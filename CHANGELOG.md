@@ -4,6 +4,10 @@ All notable changes to hyprscope are listed here, newest first.
 
 ## Unreleased
 
+## 0.1.1 - 2026-10-07
+
+- hyprscope is now under the MIT licence.
+
 ## 0.1.0 - 2026-10-07
 
 First release: the front page.
