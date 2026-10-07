@@ -1,0 +1,8 @@
+openwindow>>5609f1a1f5e0,3,notes,Scratch Notes
+urgent>>5609f1a1f5e0
+windowtitle>>5609f1a1f5e0
+windowtitlev2>>5609f1a1f5e0,Scratch Notes (2)
+activewindow>>notes,Scratch Notes (2)
+activewindowv2>>5609f1a1f5e0
+activewindow>>google-chrome,Example Page · docs - Browser
+activewindowv2>>5609f16c9870
