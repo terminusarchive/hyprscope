@@ -1,8 +1,15 @@
 [package]
 name = "hyprscope"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
+rust-version = "1.88"
 license = "MIT"
+description = "A terminal dashboard for Hyprland: windows, monitors, events, log and config."
+repository = "https://github.com/terminusarchive/hyprscope"
+readme = "README.md"
+keywords = ["hyprland", "tui", "wayland", "monitoring", "terminal"]
+categories = ["command-line-utilities", "visualization"]
+exclude = [".github/"]
 
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["clock"] }

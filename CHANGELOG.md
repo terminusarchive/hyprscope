@@ -4,6 +4,12 @@ All notable changes to hyprscope are listed here, newest first.
 
 ## Unreleased
 
+## 0.1.2 - 2026-10-07
+
+- A README, with a generated picture of the front page.
+- `--version` and `--help`; any other argument is now an error instead of being ignored.
+- A contributing guide, and automatic checks for pull requests.
+
 ## 0.1.1 - 2026-10-07
 
 - hyprscope is now under the MIT licence.

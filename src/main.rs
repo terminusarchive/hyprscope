@@ -135,7 +135,88 @@ fn scroll_to(scroll: usize, selected: Option<usize>, total: usize, page: usize) 
     at.min(total.saturating_sub(page))
 }
 
+/// What the command line asks for.
+#[derive(Debug, PartialEq)]
+enum Cli {
+    Run,
+    Version,
+    Help,
+    /// An argument that is not accepted, as it is shown to the user.
+    Unknown(String),
+}
+
+/// Exactly one argument is accepted: `-V`, `--version`, `-h` or `--help`.
+fn parse_args(args: impl IntoIterator<Item = std::ffi::OsString>) -> Cli {
+    let mut args = args.into_iter();
+    let Some(first) = args.next() else {
+        return Cli::Run;
+    };
+    let cli = match first.to_str() {
+        Some("-V" | "--version") => Cli::Version,
+        Some("-h" | "--help") => Cli::Help,
+        _ => return Cli::Unknown(first.to_string_lossy().into_owned()),
+    };
+    match args.next() {
+        Some(second) => Cli::Unknown(second.to_string_lossy().into_owned()),
+        None => cli,
+    }
+}
+
+fn version_text() -> String {
+    format!("hyprscope {}\n", env!("CARGO_PKG_VERSION"))
+}
+
+fn help_text() -> String {
+    format!(
+        "{}A terminal dashboard for Hyprland.
+
+Usage: hyprscope [OPTION]
+
+Options:
+  -h, --help     Show this help and exit
+  -V, --version  Show the version and exit
+
+Keys:
+  Up, k        Select the previous window
+  Down, j      Select the next window
+  PageUp       Select one page up
+  PageDown     Select one page down
+  q, Ctrl-C    Quit
+
+Needs a running Hyprland session and a terminal of at
+least {} columns by {} rows.
+",
+        version_text(),
+        ui::MIN_WIDTH,
+        ui::MIN_HEIGHT
+    )
+}
+
+/// Writes to standard output, ignoring a closed pipe (`hyprscope --help | head -1`).
+fn print_out(text: &str) -> ExitCode {
+    use std::io::Write;
+    let _ = write!(std::io::stdout().lock(), "{text}");
+    ExitCode::SUCCESS
+}
+
 fn main() -> ExitCode {
+    match parse_args(std::env::args_os().skip(1)) {
+        Cli::Run => {}
+        Cli::Version => return print_out(&version_text()),
+        Cli::Help => return print_out(&help_text()),
+        Cli::Unknown(arg) => {
+            use std::io::Write;
+            let _ = writeln!(
+                std::io::stderr().lock(),
+                "hyprscope: unknown argument '{arg}'\nTry 'hyprscope --help'."
+            );
+            return ExitCode::from(2);
+        }
+    }
+    run_dashboard()
+}
+
+fn run_dashboard() -> ExitCode {
     let first = Hypr::from_env().and_then(|hypr| hypr.snapshot().map(|snap| (hypr, snap)));
     let (hypr, snap) = match first {
         Ok(first) => first,
@@ -510,5 +591,81 @@ mod tests {
         assert_eq!(scroll_to(1, Some(2), 30, 10), 1);
         // Wrapping from the last window up to the first from a scrolled view.
         assert_eq!(scroll_to(20, Some(2), 30, 10), 2);
+    }
+
+    fn args(list: &[&str]) -> Vec<std::ffi::OsString> {
+        list.iter().map(std::ffi::OsString::from).collect()
+    }
+
+    #[test]
+    fn no_arguments_runs() {
+        assert_eq!(parse_args(args(&[])), Cli::Run);
+    }
+
+    #[test]
+    fn version_and_help_in_both_spellings() {
+        assert_eq!(parse_args(args(&["--version"])), Cli::Version);
+        assert_eq!(parse_args(args(&["-V"])), Cli::Version);
+        assert_eq!(parse_args(args(&["--help"])), Cli::Help);
+        assert_eq!(parse_args(args(&["-h"])), Cli::Help);
+    }
+
+    #[test]
+    fn anything_else_is_rejected_by_name() {
+        let unknown = |a: &[&str], name: &str| assert_eq!(parse_args(args(a)), Cli::Unknown(name.into()));
+        unknown(&["--bogus"], "--bogus");
+        unknown(&[""], "");
+        unknown(&["--config"], "--config");
+        unknown(&["-v"], "-v");
+        unknown(&["--version", "extra"], "extra");
+        unknown(&["-h", "--version"], "--version");
+        unknown(&["extra", "--help"], "extra");
+    }
+
+    #[test]
+    fn an_argument_that_is_not_utf8_is_unknown_and_shown_lossily() {
+        use std::os::unix::ffi::OsStringExt;
+        let bad = std::ffi::OsString::from_vec(vec![b'-', 0xff]);
+        assert_eq!(parse_args(vec![bad]), Cli::Unknown("-\u{fffd}".into()));
+    }
+
+    #[test]
+    fn help_names_the_options_the_sizes_and_every_key_on_key_handles() {
+        let text = help_text();
+        assert!(text.starts_with(&version_text()));
+        for option in ["-h, --help", "-V, --version", "Usage: hyprscope [OPTION]"] {
+            assert!(text.contains(option), "{option}");
+        }
+        assert!(text.contains(&format!("{} columns by {} rows", ui::MIN_WIDTH, ui::MIN_HEIGHT)));
+        // Every key that on_key reacts to appears in the help, by the name it lists.
+        let handled = [
+            (KeyCode::Up, "Up"), (KeyCode::Down, "Down"), (KeyCode::Char('k'), "k"),
+            (KeyCode::Char('j'), "j"), (KeyCode::PageUp, "PageUp"), (KeyCode::PageDown, "PageDown"),
+            (KeyCode::Char('q'), "q"),
+        ];
+        for (code, name) in handled {
+            assert_ne!(on_key(press(code)), Action::None, "{name} is not handled");
+            let listed = text.lines().any(|l| {
+                l.trim_start().split("  ").next().is_some_and(|keys| keys.split(", ").any(|k| k == name))
+            });
+            assert!(listed, "{name} is handled but not in the help");
+        }
+        assert!(text.contains("Ctrl-C"));
+        // A key handled but not in the list above fails: try every printable character.
+        for c in (' '..='~').chain(['\t']) {
+            if on_key(press(KeyCode::Char(c))) != Action::None {
+                assert!(matches!(c, 'q' | 'k' | 'j'), "'{c}' is handled but not listed");
+            }
+        }
+        for code in [KeyCode::Left, KeyCode::Right, KeyCode::Home, KeyCode::End, KeyCode::Enter, KeyCode::Esc, KeyCode::Tab] {
+            assert_eq!(on_key(press(code)), Action::None, "{code:?} is handled but not listed");
+        }
+    }
+
+    #[test]
+    fn no_help_line_is_wider_than_80_columns() {
+        for line in help_text().lines() {
+            assert!(line.chars().count() <= 80, "{line}");
+        }
     }
 }
