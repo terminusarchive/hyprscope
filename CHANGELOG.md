@@ -4,6 +4,10 @@ All notable changes to hyprscope are listed here, newest first.
 
 ## Unreleased
 
+## 0.2.1 - 2026-10-08
+
+- The README describes the six full-screen views, and its picture shows the front page as it now is.
+
 ## 0.2.0 - 2026-10-08
 
 - Enter opens the Windows panel full-screen with an inspector for the selected window: its state, every property Hyprland reports for it, and the process behind it.

@@ -14,16 +14,29 @@ supported driver it is a third sparkline.
 
 ## What it shows
 
-The front page has six panels.
+The front page has six panels. Each title starts with the number of the key that opens
+that panel full-screen.
 
 | Panel | What it shows |
 | --- | --- |
-| Windows | A tree of monitors, workspaces and windows. Each window shows its class, title and flags (`float`, `full`, `pin`, `xwl`); its PID, and then its size and position, are added as the panel gets wider (all of them from a terminal about 160 columns wide). One window is selected, and the tree scrolls to keep it in view. |
-| Hyprland | The compositor process: PID and uptime; CPU, resident memory and GPU use as sparklines with the current value, and the peak when the panel is wide enough; the thread count and graphics memory. The title has Hyprland's version, its config provider and the current submap. |
-| Config | A summary of the running configuration: whether it has errors (and the first one), how many options your config sets out of all that exist, binds and submaps, animations (and how many your config sets) and curves, and the time of the last reload, once hyprscope has seen one. The title shows the config file: the one given to Hyprland with `--config` or `-c`, otherwise `hyprland.lua` or `hyprland.conf` from your Hyprland config directory if it exists. |
-| Monitors | Each monitor as a box placed where it sits in your layout: name, mode, scale, active workspace and special workspace, and whether VRR, tearing and direct scanout are in effect. When the boxes would be too small, or monitors overlap in the layout, it shows one line per monitor instead (name, mode, scale, workspace). |
-| Events | Events from Hyprland's event socket, with the time each arrived. A new event folds into an existing line, raising its count (`×3`), when it is the same kind of event and, for events about a window, the same window. The line then shows the latest payload and time, and keeps its place, so the list is in order of first appearance, not of time. The title graphs events per second over the last 16 seconds. |
-| Log | The newest warnings and errors from Hyprland's log, with a count for each distinct line and the totals in the title. |
+| 3 Windows | A tree of monitors, workspaces and windows. Each window shows its class, title and flags (`float`, `full`, `pin`, `xwl`); its PID, and then its size and position, are added when the panel is wide enough to leave the title room. One window is selected, and the tree scrolls to keep it in view. |
+| 1 Hyprland | The compositor process: PID and uptime; CPU, resident memory and GPU use as sparklines with the current value, and the peak when the panel is wide enough; the thread count and graphics memory. The title has Hyprland's version, its config provider and the current submap. |
+| 2 Config | A summary of the running configuration: whether it has errors (and the first one), how many options your config sets out of all that exist, binds and submaps, animations (and how many your config sets) and curves, and the time of the last reload, once hyprscope has seen one. The title shows the config file: the one given to Hyprland with `--config` or `-c`, otherwise `hyprland.lua` or `hyprland.conf` from your Hyprland config directory if it exists. |
+| 4 Monitors | Each monitor as a box placed where it sits in your layout: name, mode, scale, active workspace and special workspace, and whether VRR, tearing and direct scanout are in effect. When the boxes would be too small, or monitors overlap in the layout, it shows one line per monitor instead (name, mode, scale, workspace). |
+| 5 Events | Events from Hyprland's event socket, with the time each arrived. A new event folds into an existing line, raising its count (`×3`), when it is the same kind of event and, for events about a window, the same window. The line then shows the latest payload and time, and keeps its place, so the list is in order of first appearance, not of time. The title graphs events per second over the last 16 seconds. |
+| 6 Log | The newest warnings and errors from Hyprland's log, with a count for each distinct line and the totals in the title. |
+
+The same six panels open full-screen from the front page. Esc returns to the front page,
+and `/` filters the lists in the Windows, Events, Log and Config views.
+
+| Key | View | What it adds |
+| --- | --- | --- |
+| `1` | Hyprland | Tall history graphs for CPU, memory and GPU, and a table of what each application with windows costs, child processes included. |
+| `2` | Config | Four tabs: the options your config sets with their defaults, the binds, the animations with their curves plotted, the input devices. |
+| `3`, `Enter` | Windows | The tree beside an inspector for the selected window: its state, every property Hyprland reports for it, and the process behind it. |
+| `4` | Monitors | A map of the monitors with their windows, and for the selected one its details, why tearing and direct scanout are not in effect, its layer surfaces and its modes. |
+| `5` | Events | Every one of the last 2,000 events on its own line, with pause, a text filter and the raw form. |
+| `6` | Log | The warnings and errors, or every level, of Hyprland's log, with a text filter. |
 
 ## Requirements
 
@@ -99,10 +112,6 @@ status 2.
 | `End` | In the Events and Log views, go to the oldest line, which pauses the view. In the Config view, go to the last row of the list. |
 | `Esc` | From a full-screen view, back to the front page. In the Windows, Events, Log and Config views it first closes the filter prompt, or clears a kept filter. |
 | `q`, `Ctrl-C` | Quit. |
-
-## Planned 
-
-- tbd
 
 ## Contributing
 
