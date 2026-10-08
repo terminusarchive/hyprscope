@@ -1,19 +1,19 @@
 Name:	Hyprland
 Umask:	0022
 State:	R (running)
-Tgid:	1656
+Tgid:	4242
 Ngid:	0
-Pid:	1656
-PPid:	1138
+Pid:	4242
+PPid:	1000
 TracerPid:	0
 Uid:	1000	1000	1000	1000
 Gid:	1000	1000	1000	1000
 FDSize:	512
-Groups:	962 990 992 998 1000 
-NStgid:	1656
-NSpid:	1656
-NSpgid:	1656
-NSsid:	1656
+Groups:	1000 
+NStgid:	4242
+NSpid:	4242
+NSpgid:	4242
+NSsid:	4242
 Kthread:	0
 VmPeak:	 1739876 kB
 VmSize:	 1549420 kB

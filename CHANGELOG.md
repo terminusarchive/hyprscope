@@ -4,6 +4,17 @@ All notable changes to hyprscope are listed here, newest first.
 
 ## Unreleased
 
+## 0.2.0 - 2026-10-08
+
+- Enter opens the Windows panel full-screen with an inspector for the selected window: its state, every property Hyprland reports for it, and the process behind it.
+- `1` opens the Hyprland panel full-screen: tall history graphs for the compositor, and a table of what each application with windows costs, child processes included. Panels with a zoomed view show their number.
+- `4` opens the Monitors panel full-screen: a map of the monitors with their windows, and for the selected one its details, whether VRR, solitary, tearing and direct scanout are in effect (and why not, for all but VRR), its layer surfaces and its modes. Up and Down choose the monitor.
+- `5` opens the Events panel full-screen: a graph of events per second, every one of the last 2,000 events on its own line with the newest at the top, and a count of each kind. Scrolling back pauses the view, Space pauses it, `/` filters the lines by text and `r` shows the events exactly as Hyprland sent them.
+- `6` opens the Log panel full-screen: every warning and error Hyprland has logged, up to the newest 2,000, and the newest 5,000 lines of every other level, one per line with the newest at the top. `l` steps the lowest level shown, from warnings and up to errors only to every level; scrolling back pauses the view, Space pauses it and `/` filters the lines by text.
+- `2` opens the Config panel full-screen, in four tabs that Tab and Shift+Tab move between: the options your configuration sets, with each value next to its default and Hyprland's description (`a` shows every option); your binds, grouped by submap; the animations, with every bezier curve drawn as a plot; and the input devices. `/` filters the open list by text, and the lists follow a reload within a second.
+- `/` in the Windows view filters the tree by text: only the windows whose class or title contains it are shown, under their workspaces and monitors. The selected window stays selected while it is still shown, and otherwise the first match is.
+- The contributing guide now says how a pull request reaches a release: it is applied by hand, then closed, and credited to its author in the changelog.
+
 ## 0.1.2 - 2026-10-07
 
 - A README, with a generated picture of the front page.

@@ -17,22 +17,77 @@ pub enum Level {
 /// How many distinct lines a `Tally` keeps.
 pub const KEPT: usize = 16;
 
-/// Splits a log line into its level and message. Only warnings, errors and critical
-/// errors give something. The line is a level word, optionally ` from <part>`, then
-/// ` ]: ` and the message; the part's name is dropped.
-pub fn parse(line: &str) -> Option<(Level, &str)> {
+/// The level words the log is known to use: `TRACE`, `DEBUG`, `WARN`, `ERR`, `CRIT`.
+/// Source: Hyprland v0.56.2 `src/debug/log/Logger.hpp` has only the five
+/// `Hyprutils::CLI::eLogLevel` values (`LOG_TRACE`, `LOG_DEBUG`, `LOG_WARN`, `LOG_ERR`,
+/// `LOG_CRIT`; its `INFO` is an alias of `DEBUG`). hyprutils 0.14.2 writes them as these
+/// words: the `TRACE `, `DEBUG `, `WARN `, `ERR `, `CRIT ` strings in `libhyprutils.so`.
+pub const WORDS: [&str; 5] = ["TRACE", "DEBUG", "WARN", "ERR", "CRIT"];
+
+/// A log line cut up, with the level word as the log wrote it (empty when the line
+/// has no known level, then the whole line is the message).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Parts<'a> {
+    pub level: &'static str,
+    pub rank: Rank,
+    pub part: &'a str,
+    pub message: &'a str,
+}
+
+/// How a level compares, for filtering: critical errors count as errors.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Rank {
+    Lower,
+    Warning,
+    Error,
+}
+
+/// A line of a known level: the level word is a level word, optionally ` from <part>`,
+/// then ` ]: ` and a message that is not empty.
+fn known(line: &str) -> Option<(&'static str, &str, &str)> {
     let (word, rest) = line.split_once(' ')?;
-    let level = match word {
+    let word = WORDS.into_iter().find(|&w| w == word)?;
+    let (part, message) = match rest.strip_prefix("]: ") {
+        Some(message) => ("", message),
+        None => rest.strip_prefix("from ")?.split_once(" ]: ")?,
+    };
+    (!message.is_empty()).then_some((word, part, message))
+}
+
+/// Cuts a line into level, part and message. A line with no known level is the whole
+/// message at the lowest rank.
+pub fn split(line: &str) -> Parts<'_> {
+    match known(line) {
+        Some((level, part, message)) => Parts {
+            level,
+            rank: match level {
+                "WARN" => Rank::Warning,
+                "ERR" | "CRIT" => Rank::Error,
+                _ => Rank::Lower,
+            },
+            part,
+            message,
+        },
+        None => Parts {
+            level: "",
+            rank: Rank::Lower,
+            part: "",
+            message: line,
+        },
+    }
+}
+
+/// Splits a log line into its level and message. Only warnings, errors and critical
+/// errors give something; the part's name is dropped.
+pub fn parse(line: &str) -> Option<(Level, &str)> {
+    let parts = split(line);
+    let level = match parts.level {
         "WARN" => Level::Warn,
         "ERR" => Level::Err,
         "CRIT" => Level::Crit,
         _ => return None,
     };
-    let message = match rest.strip_prefix("]: ") {
-        Some(message) => message,
-        None => rest.strip_prefix("from ")?.split_once(" ]: ")?.1,
-    };
-    (!message.is_empty()).then_some((level, message))
+    Some((level, parts.message))
 }
 
 /// One distinct line and how many lines it stands for.
@@ -78,6 +133,31 @@ impl Tally {
     }
 }
 
+/// One kept log line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Line {
+    /// Grows with every kept line, across resets.
+    pub seq: u64,
+    /// As the log wrote it; empty for a line with no known level.
+    pub level: &'static str,
+    pub rank: Rank,
+    /// Empty when the log names none.
+    pub part: String,
+    pub message: String,
+}
+
+/// How many lines each ring has dropped. Critical errors count as errors.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct Dropped {
+    pub warnings: u64,
+    pub errors: u64,
+    pub other: u64,
+}
+
+/// The most warnings, errors and critical errors kept, and the most of every other kind.
+pub const IMPORTANT_KEPT: usize = 2000;
+pub const OTHER_KEPT: usize = 5000;
+
 /// The most one `poll` reads, so a log left to grow for days is caught up over several
 /// polls instead of in one stall.
 pub const READ_LIMIT: u64 = 8 * 1024 * 1024;
@@ -97,6 +177,15 @@ pub struct Log {
     skipping: bool,
     available: bool,
     tally: Tally,
+    /// Warnings, errors and critical errors, oldest first, at most `IMPORTANT_KEPT`.
+    important: VecDeque<Line>,
+    /// Every other line, oldest first, at most `OTHER_KEPT`.
+    other: VecDeque<Line>,
+    dropped: Dropped,
+    /// The number the next kept line gets. Never reset, so a number is never reused.
+    next_seq: u64,
+    /// How many times the rings have been cleared: the log was replaced, emptied or lost.
+    restarts: u64,
 }
 
 impl Log {
@@ -110,6 +199,11 @@ impl Log {
             skipping: false,
             available: false,
             tally: Tally::default(),
+            important: VecDeque::new(),
+            other: VecDeque::new(),
+            dropped: Dropped::default(),
+            next_seq: 1,
+            restarts: 0,
         }
     }
 
@@ -120,6 +214,40 @@ impl Log {
 
     pub fn tally(&self) -> &Tally {
         &self.tally
+    }
+
+    /// Kept warnings, errors and critical errors, oldest first, ordered by `seq`.
+    pub fn important(&self) -> &VecDeque<Line> {
+        &self.important
+    }
+
+    /// Every other kept line, oldest first, ordered by `seq`.
+    pub fn other(&self) -> &VecDeque<Line> {
+        &self.other
+    }
+
+    pub fn dropped(&self) -> Dropped {
+        self.dropped
+    }
+
+    /// The `seq` of the newest line kept so far, 0 before any. The loop watches it while the
+    /// Log screen shows.
+    pub fn newest(&self) -> u64 {
+        self.next_seq - 1
+    }
+
+    /// How many times the rings have been cleared. A view holding a line number from before
+    /// a clearing finds it names nothing in the new log, so it watches this.
+    pub fn restarts(&self) -> u64 {
+        self.restarts
+    }
+
+    /// The kept line with this `seq`, found by bisecting the rings.
+    pub fn line(&self, seq: u64) -> Option<&Line> {
+        [&self.important, &self.other].into_iter().find_map(|ring| {
+            let i = ring.partition_point(|l| l.seq < seq);
+            ring.get(i).filter(|l| l.seq == seq)
+        })
     }
 
     /// Reads what has been added since the last call, at most `READ_LIMIT` bytes. True
@@ -171,11 +299,45 @@ impl Log {
                 continue;
             }
             let line = String::from_utf8_lossy(line);
-            if let Some((level, message)) = parse(line.trim_end_matches('\r')) {
+            let line = line.trim_end_matches('\r');
+            if let Some((level, message)) = parse(line) {
                 self.tally.push(level, message);
             }
+            self.keep(line);
         }
         changed || before != (self.tally.errors, self.tally.warnings)
+    }
+
+    /// Keeps a line in the ring for its rank, dropping that ring's oldest when full.
+    fn keep(&mut self, line: &str) {
+        if line.is_empty() {
+            return;
+        }
+        let parts = split(line);
+        let kept = Line {
+            seq: self.next_seq,
+            level: parts.level,
+            rank: parts.rank,
+            part: parts.part.to_string(),
+            message: parts.message.to_string(),
+        };
+        self.next_seq += 1;
+        let (ring, limit) = match parts.rank {
+            Rank::Lower => (&mut self.other, OTHER_KEPT),
+            _ => (&mut self.important, IMPORTANT_KEPT),
+        };
+        ring.push_back(kept);
+        if ring.len() > limit {
+            let gone = ring
+                .pop_front()
+                .expect("a ring over its limit is not empty");
+            let count = match gone.rank {
+                Rank::Lower => &mut self.dropped.other,
+                Rank::Warning => &mut self.dropped.warnings,
+                Rank::Error => &mut self.dropped.errors,
+            };
+            *count += 1;
+        }
     }
 
     /// Drops a last line that has outgrown `MAX_LINE`, and skips the rest of it.
@@ -189,16 +351,24 @@ impl Log {
     /// Forgets everything read. True when that changed what the tally shows.
     fn reset(&mut self) -> bool {
         let changed = self.tally != Tally::default();
+        self.restarts += 1;
         (self.offset, self.file_id, self.tally) = (0, 0, Tally::default());
         self.partial.clear();
         self.skipping = false;
+        // The numbers go on: a paused view may still hold one, and a restart would
+        // let it name a different line.
+        (self.important, self.other, self.dropped) = Default::default();
         changed
     }
 
     /// The file cannot be read: forget it. True when that is news.
     fn lose(&mut self) -> bool {
-        self.reset();
-        std::mem::replace(&mut self.available, false)
+        let was_available = std::mem::replace(&mut self.available, false);
+        // Polling a log that stays unreadable clears nothing more.
+        if was_available {
+            self.reset();
+        }
+        was_available
     }
 }
 
@@ -590,6 +760,287 @@ mod tests {
         assert!(log.poll());
         assert!(log.available());
         assert_eq!(log.tally().errors, 1);
+    }
+
+    fn kept(log: &Log) -> Vec<(u64, &'static str, Rank, String, String)> {
+        let mut all: Vec<_> = log
+            .important()
+            .iter()
+            .chain(log.other())
+            .map(|l| (l.seq, l.level, l.rank, l.part.clone(), l.message.clone()))
+            .collect();
+        all.sort_by_key(|l| l.0);
+        all
+    }
+
+    #[test]
+    fn a_line_is_split_into_level_part_and_message() {
+        let p = split("ERR from aquamarine ]: drm: x");
+        assert_eq!(
+            (p.level, p.rank, p.part, p.message),
+            ("ERR", Rank::Error, "aquamarine", "drm: x")
+        );
+        let p = split("WARN ]: y");
+        assert_eq!(
+            (p.level, p.rank, p.part, p.message),
+            ("WARN", Rank::Warning, "", "y")
+        );
+        let p = split("CRIT from core ]: z");
+        assert_eq!((p.level, p.rank), ("CRIT", Rank::Error));
+        for word in ["DEBUG", "TRACE"] {
+            let line = format!("{word} from a ]: m");
+            let p = split(&line);
+            assert_eq!(
+                (p.level, p.rank, p.part, p.message),
+                (word, Rank::Lower, "a", "m")
+            );
+        }
+    }
+
+    #[test]
+    fn a_line_with_no_known_level_is_kept_whole_at_the_lowest_level() {
+        for line in [
+            "no level here",
+            "INFO ]: a",
+            "ERRX ]: a",
+            "ERR",
+            "WARN ]: ",
+            "ERR from x",
+        ] {
+            let p = split(line);
+            assert_eq!(
+                (p.level, p.rank, p.part, p.message),
+                ("", Rank::Lower, "", line),
+                "{line:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn every_kept_line_gets_the_next_number_in_the_logs_order_and_empty_lines_are_not_kept() {
+        let dir = TempDir::new("log-seq");
+        let (path, mut log) = log_in(&dir);
+        assert_eq!(log.newest(), 0);
+        std::fs::write(
+            &path,
+            "DEBUG from a ]: one\n\nERR ]: two\r\n\r\nplain\nWARN ]: three\n",
+        )
+        .unwrap();
+        log.poll();
+        let got = kept(&log);
+        assert_eq!(
+            got.iter().map(|l| (l.0, l.4.as_str())).collect::<Vec<_>>(),
+            [(1, "one"), (2, "two"), (3, "plain"), (4, "three")]
+        );
+        assert_eq!(got[2].1, "");
+        assert_eq!(got[2].2, Rank::Lower);
+        assert_eq!(log.newest(), 4);
+    }
+
+    #[test]
+    fn warnings_errors_and_criticals_share_one_ring_of_2000_and_the_rest_another_of_5000() {
+        let dir = TempDir::new("log-rings");
+        let (path, mut log) = log_in(&dir);
+        let mut text = String::new();
+        for i in 0..2001 {
+            text.push_str(&format!("{} ]: m{i}\n", ["WARN", "ERR", "CRIT"][i % 3]));
+        }
+        for i in 0..5001 {
+            text.push_str(&format!("DEBUG ]: d{i}\n"));
+        }
+        std::fs::write(&path, &text).unwrap();
+        log.poll();
+        assert_eq!((log.important().len(), log.other().len()), (2000, 5000));
+        assert_eq!(log.important().front().unwrap().message, "m1");
+        assert_eq!(log.other().front().unwrap().message, "d1");
+        assert_eq!(log.other().back().unwrap().message, "d5000");
+        // m0 was a warning; it is the only important line dropped.
+        assert_eq!(
+            log.dropped(),
+            Dropped {
+                warnings: 1,
+                errors: 0,
+                other: 1
+            }
+        );
+        assert_eq!(log.newest(), 2001 + 5001);
+    }
+
+    #[test]
+    fn criticals_count_as_errors_in_the_dropped_count() {
+        let dir = TempDir::new("log-dropped-err");
+        let (path, mut log) = log_in(&dir);
+        let mut text = String::from("CRIT ]: c\nERR ]: e\n");
+        for i in 0..2000 {
+            text.push_str(&format!("WARN ]: w{i}\n"));
+        }
+        std::fs::write(&path, &text).unwrap();
+        log.poll();
+        assert_eq!(
+            log.dropped(),
+            Dropped {
+                warnings: 0,
+                errors: 2,
+                other: 0
+            }
+        );
+        assert!(log.important().iter().all(|l| l.rank == Rank::Warning));
+    }
+
+    #[test]
+    fn five_thousand_and_one_debug_lines_push_out_no_error() {
+        let dir = TempDir::new("log-no-push");
+        let (path, mut log) = log_in(&dir);
+        let mut text = String::from("ERR ]: keep me\n");
+        for i in 0..5001 {
+            text.push_str(&format!("DEBUG ]: d{i}\n"));
+        }
+        std::fs::write(&path, &text).unwrap();
+        log.poll();
+        assert_eq!(log.important().len(), 1);
+        assert_eq!(
+            log.dropped(),
+            Dropped {
+                warnings: 0,
+                errors: 0,
+                other: 1
+            }
+        );
+    }
+
+    #[test]
+    fn a_replaced_or_emptied_log_clears_the_rings_and_counts_and_the_numbers_go_on() {
+        let dir = TempDir::new("log-reset-rings");
+        let (path, mut log) = log_in(&dir);
+        let mut text = String::new();
+        for _ in 0..2001 {
+            text.push_str("ERR ]: e\n");
+        }
+        text.push_str("DEBUG ]: d\n");
+        std::fs::write(&path, &text).unwrap();
+        log.poll();
+        assert_eq!(log.newest(), 2002);
+        std::fs::write(&path, "").unwrap();
+        log.poll();
+        assert_eq!((log.important().len(), log.other().len()), (0, 0));
+        assert_eq!(log.dropped(), Dropped::default());
+        append(&path, b"WARN ]: fresh\n");
+        log.poll();
+        assert_eq!(
+            kept(&log),
+            [(2003, "WARN", Rank::Warning, String::new(), "fresh".into())]
+        );
+        // A replacement file does the same.
+        let new = dir.join("new.log");
+        std::fs::write(&new, "DEBUG ]: a\nDEBUG ]: b\nDEBUG ]: c\n").unwrap();
+        std::fs::rename(&new, &path).unwrap();
+        log.poll();
+        assert_eq!(
+            kept(&log).iter().map(|l| l.0).collect::<Vec<_>>(),
+            [2004, 2005, 2006]
+        );
+        assert!(log.important().is_empty());
+    }
+
+    #[test]
+    fn an_unreadable_log_has_no_lines_and_a_later_poll_recovers_them() {
+        let dir = TempDir::new("log-unreadable");
+        let (path, mut log) = log_in(&dir);
+        std::fs::write(&path, "ERR ]: a\nDEBUG ]: b\n").unwrap();
+        log.poll();
+        std::fs::remove_file(&path).unwrap();
+        log.poll();
+        assert!(!log.available());
+        assert!(log.important().is_empty() && log.other().is_empty());
+        std::fs::write(&path, "ERR ]: a\nDEBUG ]: b\n").unwrap();
+        log.poll();
+        assert!(log.available());
+        assert_eq!(kept(&log).len(), 2);
+        assert!(log.newest() > 2);
+    }
+
+    #[test]
+    fn the_restart_count_moves_when_the_log_is_replaced_emptied_or_lost_and_not_when_it_grows() {
+        let dir = TempDir::new("log-restarts");
+        let (path, mut log) = log_in(&dir);
+        assert_eq!(log.restarts(), 0);
+        std::fs::write(&path, "DEBUG ]: a\nDEBUG ]: b\n").unwrap();
+        log.poll();
+        append(&path, b"DEBUG ]: c\n");
+        log.poll();
+        assert_eq!(log.restarts(), 0, "growth");
+        std::fs::write(&path, "").unwrap();
+        log.poll();
+        assert_eq!(log.restarts(), 1, "emptied");
+        std::fs::write(&path, "DEBUG ]: a\n").unwrap();
+        log.poll();
+        let new = dir.join("new.log");
+        std::fs::write(&new, "DEBUG ]: x\nDEBUG ]: y\n").unwrap();
+        std::fs::rename(&new, &path).unwrap();
+        log.poll();
+        assert_eq!(log.restarts(), 2, "replaced");
+        std::fs::remove_file(&path).unwrap();
+        log.poll();
+        log.poll();
+        assert_eq!(log.restarts(), 3, "unreadable, counted once");
+    }
+
+    #[test]
+    fn a_line_over_the_length_limit_is_discarded_whole_and_takes_no_number() {
+        let dir = TempDir::new("log-long-kept");
+        let (path, mut log) = log_in(&dir);
+        let mut text = b"DEBUG ]: ".to_vec();
+        text.extend(vec![b'x'; 200 * 1024]);
+        text.extend_from_slice(b"\nDEBUG ]: after\n");
+        std::fs::write(&path, &text).unwrap();
+        log.poll();
+        assert_eq!(
+            kept(&log)
+                .iter()
+                .map(|l| (l.0, l.4.as_str()))
+                .collect::<Vec<_>>(),
+            [(1, "after")]
+        );
+    }
+
+    #[test]
+    fn the_newest_number_moves_for_any_kept_line_but_poll_reports_only_tally_changes() {
+        let dir = TempDir::new("log-newest");
+        let (path, mut log) = log_in(&dir);
+        std::fs::write(&path, "ERR ]: a\n").unwrap();
+        assert!(log.poll());
+        assert_eq!(log.newest(), 1);
+        append(&path, b"DEBUG ]: b\n");
+        assert!(!log.poll());
+        assert_eq!(log.newest(), 2);
+        assert!(!log.poll());
+        assert_eq!(log.newest(), 2);
+    }
+
+    #[test]
+    fn a_kept_line_is_found_by_its_number_in_either_ring() {
+        let dir = TempDir::new("log-find");
+        let (path, mut log) = log_in(&dir);
+        let mut text = String::new();
+        for i in 0..6000 {
+            text.push_str(if i % 2 == 0 {
+                "ERR ]: e\n"
+            } else {
+                "DEBUG ]: d\n"
+            });
+        }
+        std::fs::write(&path, &text).unwrap();
+        log.poll();
+        for seq in [log.newest(), log.newest() - 1, 3000, 3001] {
+            assert_eq!(log.line(seq).map(|l| l.seq), Some(seq));
+        }
+        assert_eq!(log.line(0).map(|l| l.seq), None);
+        assert_eq!(log.line(log.newest() + 1).map(|l| l.seq), None);
+        // 3000 errors keep the newest 2000, so the oldest 1000 (odd seq below 2001) are gone.
+        assert!(log.line(1).is_none());
+        assert!(log.line(1999).is_none());
+        assert!(log.line(2001).is_some());
+        assert!(log.line(2).is_some());
     }
 
     #[test]

@@ -1,6 +1,6 @@
 [package]
 name = "hyprscope"
-version = "0.1.2"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT"
@@ -9,7 +9,15 @@ repository = "https://github.com/terminusarchive/hyprscope"
 readme = "README.md"
 keywords = ["hyprland", "tui", "wayland", "monitoring", "terminal"]
 categories = ["command-line-utilities", "visualization"]
-exclude = [".github/"]
+include = [
+    "src/**",
+    "tests/**",
+    "docs/screenshot.svg",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "Cargo.lock",
+]
 
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["clock"] }

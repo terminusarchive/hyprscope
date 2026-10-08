@@ -1,6 +1,7 @@
 //! Reads what the Hyprland process is using from `/proc`.
 
 use std::collections::{HashMap, VecDeque};
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -60,33 +61,58 @@ impl History {
     }
 }
 
+/// The newest `width` values and the scale they are drawn on. Both `spark` and the area graph
+/// take their scale from here, so the two cannot disagree.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Scale {
+    /// The visible values, a negative or missing one counted as nothing and the lowest taken
+    /// away when the scale starts from there.
+    pub values: Vec<f64>,
+    /// What zero on the scale stands for: zero, or the lowest visible value.
+    pub low: f64,
+    /// The size of the scale: the largest value, but at least the floor.
+    pub span: f64,
+    /// The true highest visible value.
+    pub peak: f64,
+}
+
+/// The scale for the newest `width` of `values`: from zero, or from the lowest visible value
+/// when `from_low`, across at least `floor`.
+pub(crate) fn scale(values: &[f64], width: usize, floor: f64, from_low: bool) -> Scale {
+    let visible = &values[values.len().saturating_sub(width)..];
+    // `max` skips a NaN, and a negative value counts as nothing.
+    let clean: Vec<f64> = visible.iter().map(|v| v.max(0.0)).collect();
+    let low = if from_low { clean.iter().copied().fold(f64::INFINITY, f64::min) } else { 0.0 };
+    let low = if low.is_finite() { low } else { 0.0 };
+    let values: Vec<f64> = clean.iter().map(|v| v - low).collect();
+    let span = values.iter().copied().fold(0.0, f64::max).max(floor);
+    let peak = visible.iter().copied().fold(0.0, f64::max);
+    Scale { values, low, span, peak }
+}
+
+fn bars(scale: &Scale, width: usize) -> String {
+    const BARS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+    let bars = scale.values.iter().map(|v| {
+        let level = if scale.span > 0.0 { (v / scale.span * 7.0) as usize } else { 0 };
+        BARS[level.min(7)]
+    });
+    let blanks = std::iter::repeat_n(' ', width - scale.values.len());
+    blanks.chain(bars).collect()
+}
+
 /// The newest `width` values as bars, right-aligned with blanks to the left, and the largest
 /// of those values. Bars are scaled so the tallest is the full block, except that the scale
 /// never goes below `floor`.
 pub fn spark(values: &[f64], width: usize, floor: f64) -> (String, f64) {
-    const BARS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
-    let visible = &values[values.len().saturating_sub(width)..];
-    // `max` skips a NaN, and a negative value counts as nothing.
-    let visible: Vec<f64> = visible.iter().map(|v| v.max(0.0)).collect();
-    let peak = visible.iter().copied().fold(0.0, f64::max);
-    let scale = peak.max(floor);
-    let bars = visible.iter().map(|v| {
-        let level = if scale > 0.0 { (v / scale * 7.0) as usize } else { 0 };
-        BARS[level.min(7)]
-    });
-    let blanks = std::iter::repeat_n(' ', width - visible.len());
-    (blanks.chain(bars).collect(), peak)
+    let scale = scale(values, width, floor, false);
+    (bars(&scale, width), scale.peak)
 }
 
 /// Like `spark`, but the bars run from the lowest of the newest `width` values up to the
 /// highest, across at least `min_span`. The returned peak is the true highest value.
 pub fn spark_from_low(values: &[f64], width: usize, min_span: f64) -> (String, f64) {
-    let visible = &values[values.len().saturating_sub(width)..];
-    let low = visible.iter().map(|v| v.max(0.0)).fold(f64::INFINITY, f64::min);
-    let shifted: Vec<f64> = visible.iter().map(|v| v.max(0.0) - low).collect();
-    let (bars, _) = spark(&shifted, width, min_span);
-    let peak = visible.iter().copied().fold(0.0, f64::max);
-    (bars, peak)
+    let scale = scale(values, width, min_span, true);
+    (bars(&scale, width), scale.peak)
 }
 
 type Counters = HashMap<(String, u64, String), Counter>;
@@ -98,11 +124,60 @@ pub struct Sampler {
     prev: Option<(Instant, u64)>,
     /// Time and counters of the previous sample, by device, client id and engine.
     gpu_prev: Option<(Instant, Counters)>,
+    /// When the process's whole fdinfo directory was last read, and which descriptors in it were
+    /// DRM clients. Between rescans only those are read.
+    drm_fds: Option<(Instant, Vec<OsString>)>,
 }
+
+/// How long the remembered DRM descriptors are trusted before the whole fdinfo directory is
+/// read again, which is how a client opened later is found.
+const RESCAN: Duration = Duration::from_secs(10);
 
 impl Sampler {
     pub fn new(proc_dir: impl Into<PathBuf>, uptime_file: impl Into<PathBuf>) -> Self {
-        Sampler { proc_dir: proc_dir.into(), uptime_file: uptime_file.into(), prev: None, gpu_prev: None }
+        Sampler { proc_dir: proc_dir.into(), uptime_file: uptime_file.into(), prev: None, gpu_prev: None, drm_fds: None }
+    }
+
+    /// The DRM clients of the process: from every descriptor when it is first seen and every
+    /// `RESCAN` after, else from the descriptors that were clients at the last scan, which a
+    /// descriptor that has gone or is no longer a client leaves quietly. `None` when the
+    /// directory cannot be read.
+    fn clients(&mut self, now: Instant) -> Option<Vec<Client>> {
+        let dir = self.proc_dir.join("fdinfo");
+        let remembered = match &self.drm_fds {
+            Some((at, fds)) if now.checked_duration_since(*at).is_some_and(|age| age < RESCAN) => Some(fds.clone()),
+            _ => None,
+        };
+        let full = remembered.is_none();
+        let names = match remembered {
+            Some(names) => names,
+            None => {
+                let mut names: Vec<OsString> =
+                    std::fs::read_dir(&dir).ok()?.filter_map(|e| Some(e.ok()?.file_name())).collect();
+                names.sort();
+                names
+            }
+        };
+        let found: Vec<(OsString, Client)> = names
+            .into_iter()
+            .filter_map(|name| {
+                let client = std::fs::read_to_string(dir.join(&name)).ok().as_deref().and_then(parse_fdinfo)?;
+                Some((name, client))
+            })
+            .collect();
+        let fds = found.iter().map(|(name, _)| name.clone()).collect();
+        self.drm_fds = match (&self.drm_fds, full) {
+            (Some((at, _)), false) => Some((*at, fds)),
+            _ => Some((now, fds)),
+        };
+        // One client per device and `drm-client-id`: several descriptors can refer to the same one.
+        let mut clients: Vec<Client> = Vec::new();
+        for (_, client) in found {
+            if clients.iter().all(|o| (&o.pdev, o.id) != (&client.pdev, client.id)) {
+                clients.push(client);
+            }
+        }
+        Some(clients)
     }
 
     pub fn sample(&mut self, now: Instant) -> Sample {
@@ -131,8 +206,7 @@ impl Sampler {
     /// GPU use from the process's DRM clients: for each engine, the busy gain of all clients
     /// over the gain of the time it is measured against, and the busiest engine is the figure.
     fn sample_gpu(&mut self, now: Instant) -> Option<Gpu> {
-        let clients: Vec<Client> =
-            read_clients(&self.proc_dir.join("fdinfo"))?.into_iter().filter(|c| !c.engines.is_empty()).collect();
+        let clients: Vec<Client> = self.clients(now)?.into_iter().filter(|c| !c.engines.is_empty()).collect();
         let mut percent = None;
         if let Some((then, prev)) = &self.gpu_prev {
             let elapsed_ns = now.checked_duration_since(*then).map_or(0.0, |d| d.as_nanos() as f64);
@@ -242,40 +316,26 @@ fn parse_bytes(value: &str) -> Option<u64> {
     number.parse::<u64>().ok()?.checked_mul(scale)
 }
 
-/// One client per device and `drm-client-id`: several descriptors can refer to the same client.
-/// `None` when the directory cannot be read.
-fn read_clients(dir: &Path) -> Option<Vec<Client>> {
-    let mut paths: Vec<PathBuf> =
-        std::fs::read_dir(dir).ok()?.filter_map(|e| Some(e.ok()?.path())).collect();
-    paths.sort();
-    let mut clients: Vec<Client> = Vec::new();
-    for path in paths {
-        let client = std::fs::read_to_string(path).ok().as_deref().and_then(parse_fdinfo);
-        if let Some(client) = client.filter(|c| clients.iter().all(|o| (&o.pdev, o.id) != (&c.pdev, c.id))) {
-            clients.push(client);
-        }
-    }
-    Some(clients)
-}
-
 #[derive(Debug, PartialEq)]
-struct Stat {
+pub(crate) struct Stat {
+    /// The parent's process ID.
+    pub ppid: u32,
     /// `utime + stime`, in ticks of 1/100 s.
-    cpu_ticks: u64,
+    pub cpu_ticks: u64,
     /// Start time after boot, in ticks of 1/100 s.
-    start_ticks: u64,
+    pub start_ticks: u64,
 }
 
 /// Linux fixes the unit of the tick counters in `stat` at 1/100 s for user space.
 const TICKS_PER_SEC: f64 = 100.0;
 
-fn parse_stat(text: &str) -> Option<Stat> {
+pub(crate) fn parse_stat(text: &str) -> Option<Stat> {
     // The name in parentheses may hold spaces and `)`, so count fields after the last `)`.
     // They start at the 3rd field of the line, so utime is index 11 and starttime index 19.
     let rest = text.get(text.rfind(')')? + 1..)?;
     let fields: Vec<&str> = rest.split_whitespace().collect();
     let field = |i: usize| fields.get(i)?.parse::<u64>().ok();
-    Some(Stat { cpu_ticks: field(11)?.checked_add(field(12)?)?, start_ticks: field(19)? })
+    Some(Stat { ppid: field(1)?.try_into().ok()?, cpu_ticks: field(11)?.checked_add(field(12)?)?, start_ticks: field(19)? })
 }
 
 fn parse_status(text: &str) -> (Option<u64>, Option<u32>) {
@@ -289,6 +349,41 @@ fn parse_status(text: &str) -> (Option<u64>, Option<u32>) {
 
 fn parse_uptime(text: &str) -> Option<f64> {
     text.split_whitespace().next()?.parse().ok()
+}
+
+/// What identifies a process, apart from the figures a `Sampler` reads. Each field is `None`
+/// when its source is missing or unreadable.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ProcessInfo {
+    /// The arguments joined with single spaces.
+    pub cmdline: Option<String>,
+    /// The working directory, with a leading `home` written as `~`.
+    pub cwd: Option<String>,
+    /// The name of the parent process, from the parent's `comm` beside this process's directory.
+    pub parent: Option<String>,
+}
+
+/// Reads `cmdline`, `cwd` and the parent's name for the process directory `proc_dir`, such as
+/// `/proc/1234`. The parent's directory is looked up beside it.
+pub fn describe(proc_dir: &Path, home: Option<&Path>) -> ProcessInfo {
+    let cmdline = std::fs::read(proc_dir.join("cmdline")).ok().and_then(|bytes| {
+        let text = String::from_utf8_lossy(&bytes);
+        let args: Vec<&str> = text.split('\0').filter(|a| !a.is_empty()).collect();
+        (!args.is_empty()).then(|| args.join(" "))
+    });
+    let cwd = std::fs::read_link(proc_dir.join("cwd")).ok().map(|path| match home.and_then(|h| path.strip_prefix(h).ok()) {
+        Some(rest) if rest.as_os_str().is_empty() => "~".to_string(),
+        Some(rest) => Path::new("~").join(rest).to_string_lossy().into_owned(),
+        None => path.to_string_lossy().into_owned(),
+    });
+    let parent = std::fs::read_to_string(proc_dir.join("status"))
+        .ok()
+        .and_then(|status| status.lines().find_map(|l| l.strip_prefix("PPid:")?.trim().parse::<u64>().ok()))
+        .zip(proc_dir.parent())
+        .and_then(|(ppid, root)| std::fs::read_to_string(root.join(ppid.to_string()).join("comm")).ok())
+        .map(|name| name.trim_end().to_string())
+        .filter(|name| !name.is_empty());
+    ProcessInfo { cmdline, cwd, parent }
 }
 
 #[cfg(test)]
@@ -309,13 +404,13 @@ mod tests {
 
     /// A stat line whose `utime + stime` is `ticks`.
     fn stat_with(ticks: u64) -> String {
-        format!("1656 (Hyprland) S 1 1 1 0 -1 0 0 0 0 0 {ticks} 0 0 0 20 0 17 0 2413 0 0\n")
+        format!("4242 (Hyprland) S 1 1 1 0 -1 0 0 0 0 0 {ticks} 0 0 0 20 0 17 0 2413 0 0\n")
     }
 
     /// A process directory and uptime file, filled as a real system would.
     fn fake_proc(name: &str) -> (TempDir, PathBuf, PathBuf) {
         let root = TempDir::new(&format!("usage-{name}"));
-        let proc = root.join("1656");
+        let proc = root.join("4242");
         fs::create_dir(&proc).unwrap();
         fs::write(proc.join("stat"), STAT).unwrap();
         fs::write(proc.join("status"), STATUS).unwrap();
@@ -326,13 +421,13 @@ mod tests {
 
     #[test]
     fn stat_fixture_gives_ticks_and_start_time() {
-        assert_eq!(parse_stat(STAT), Some(Stat { cpu_ticks: 23925 + 14672, start_ticks: 2413 }));
+        assert_eq!(parse_stat(STAT), Some(Stat { ppid: 1000, cpu_ticks: 23925 + 14672, start_ticks: 2413 }));
     }
 
     #[test]
     fn stat_with_spaces_and_parenthesis_in_the_name_parses() {
         let text = "42 (my ) S (x) R 1 1 1 0 -1 0 0 0 0 0 7 5 0 0 20 0 3 0 99 0 0\n";
-        assert_eq!(parse_stat(text), Some(Stat { cpu_ticks: 12, start_ticks: 99 }));
+        assert_eq!(parse_stat(text), Some(Stat { ppid: 1, cpu_ticks: 12, start_ticks: 99 }));
     }
 
     #[test]
@@ -624,6 +719,103 @@ mod tests {
         assert_eq!(sampler.sample(Instant::now()).gpu, None);
     }
 
+    /// An fdinfo file for client `id` holding `kib` KiB, with an engine that is always at `busy_ms`.
+    fn drm_client(id: u32, kib: u64) -> String {
+        format!("drm-client-id:\t{id}\ndrm-engine-gfx:\t1000000 ns\ndrm-resident-vram:\t{kib} KiB\n")
+    }
+
+    fn graphics_memory(sampler: &mut Sampler, at: Instant) -> Option<u64> {
+        sampler.sample(at).gpu.map(|g| g.mem / 1024)
+    }
+
+    #[test]
+    fn between_rescans_only_the_descriptors_that_were_clients_are_read() {
+        let (_dir, proc, uptime) = fake_proc("rescan-known");
+        let mut sampler = Sampler::new(&proc, uptime);
+        let t0 = Instant::now();
+        set_fdinfo(&proc, &[("52", &drm_client(1, 100)), ("3", "pos:\t0\n")]);
+        assert_eq!(graphics_memory(&mut sampler, t0), Some(100));
+        // Descriptor 3 becomes a client and 52 changes. If 3 were read, the memory would be 350.
+        fs::write(proc.join("fdinfo/3"), drm_client(2, 250)).unwrap();
+        fs::write(proc.join("fdinfo/52"), drm_client(1, 120)).unwrap();
+        assert_eq!(graphics_memory(&mut sampler, t0 + Duration::from_secs(1)), Some(120));
+        assert_eq!(graphics_memory(&mut sampler, t0 + Duration::from_secs(9)), Some(120));
+    }
+
+    #[test]
+    fn a_client_that_appears_later_is_counted_after_ten_seconds_and_not_before() {
+        let (_dir, proc, uptime) = fake_proc("rescan-new");
+        let mut sampler = Sampler::new(&proc, uptime);
+        let t0 = Instant::now();
+        set_fdinfo(&proc, &[("52", &drm_client(1, 100))]);
+        assert_eq!(graphics_memory(&mut sampler, t0), Some(100));
+        fs::write(proc.join("fdinfo/60"), drm_client(2, 40)).unwrap();
+        assert_eq!(graphics_memory(&mut sampler, t0 + Duration::from_millis(9999)), Some(100));
+        assert_eq!(graphics_memory(&mut sampler, t0 + Duration::from_secs(10)), Some(140));
+        // The next ten seconds count from that scan.
+        fs::write(proc.join("fdinfo/61"), drm_client(3, 5)).unwrap();
+        assert_eq!(graphics_memory(&mut sampler, t0 + Duration::from_secs(19)), Some(140));
+        assert_eq!(graphics_memory(&mut sampler, t0 + Duration::from_secs(20)), Some(145));
+    }
+
+    #[test]
+    fn a_process_with_no_client_is_scanned_again_after_ten_seconds() {
+        let (_dir, proc, uptime) = fake_proc("rescan-none");
+        let mut sampler = Sampler::new(&proc, uptime);
+        let t0 = Instant::now();
+        set_fdinfo(&proc, &[("0", "pos:\t0\n")]);
+        assert_eq!(graphics_memory(&mut sampler, t0), None);
+        fs::write(proc.join("fdinfo/9"), drm_client(1, 7)).unwrap();
+        assert_eq!(graphics_memory(&mut sampler, t0 + Duration::from_secs(5)), None);
+        assert_eq!(graphics_memory(&mut sampler, t0 + Duration::from_secs(10)), Some(7));
+    }
+
+    #[test]
+    fn a_remembered_descriptor_that_has_gone_leaves_the_other_figures_intact() {
+        let (_dir, proc, uptime) = fake_proc("rescan-gone");
+        let mut sampler = Sampler::new(&proc, uptime);
+        let t0 = Instant::now();
+        set_fdinfo(&proc, &[("52", &drm_client(1, 100)), ("53", &drm_client(2, 30))]);
+        assert_eq!(graphics_memory(&mut sampler, t0), Some(130));
+        fs::remove_file(proc.join("fdinfo/52")).unwrap();
+        assert_eq!(graphics_memory(&mut sampler, t0 + Duration::from_secs(1)), Some(30));
+        fs::remove_file(proc.join("fdinfo/53")).unwrap();
+        assert_eq!(graphics_memory(&mut sampler, t0 + Duration::from_secs(2)), None);
+        // The whole directory going is the same as no client.
+        fs::remove_dir_all(proc.join("fdinfo")).unwrap();
+        assert_eq!(graphics_memory(&mut sampler, t0 + Duration::from_secs(3)), None);
+    }
+
+    #[test]
+    fn a_descriptor_number_reused_by_a_file_that_is_not_a_client_stops_counting() {
+        let (_dir, proc, uptime) = fake_proc("rescan-reused");
+        let mut sampler = Sampler::new(&proc, uptime);
+        let t0 = Instant::now();
+        set_fdinfo(&proc, &[("52", &drm_client(1, 100)), ("53", &drm_client(2, 30))]);
+        assert_eq!(graphics_memory(&mut sampler, t0), Some(130));
+        fs::write(proc.join("fdinfo/52"), "pos:\t0\nflags:\t02\n").unwrap();
+        assert_eq!(graphics_memory(&mut sampler, t0 + Duration::from_secs(1)), Some(30));
+        // It is forgotten: a client that takes the number again is found by the next rescan.
+        fs::write(proc.join("fdinfo/52"), drm_client(1, 100)).unwrap();
+        assert_eq!(graphics_memory(&mut sampler, t0 + Duration::from_secs(2)), Some(30));
+        assert_eq!(graphics_memory(&mut sampler, t0 + Duration::from_secs(10)), Some(130));
+    }
+
+    #[test]
+    fn a_rescan_gives_what_reading_every_descriptor_gives() {
+        let (_dir, proc, uptime) = fake_proc("rescan-same");
+        let mut sampler = Sampler::new(&proc, uptime);
+        let t0 = Instant::now();
+        set_fdinfo(&proc, &[("1", "pos:\t0\n"), ("52", &drm_client(1, 100)), ("53", &drm_client(1, 100)), ("54", &drm_client(2, 30))]);
+        for second in [0, 10, 20] {
+            // Two descriptors on one client count once.
+            assert_eq!(graphics_memory(&mut sampler, t0 + Duration::from_secs(second)), Some(130));
+        }
+        fs::remove_file(proc.join("fdinfo/52")).unwrap();
+        // The other descriptor of client 1 carries it on between rescans.
+        assert_eq!(graphics_memory(&mut sampler, t0 + Duration::from_secs(21)), Some(130));
+    }
+
     fn sample_with_cpu(cpu: f64) -> Sample {
         Sample { cpu: Some(cpu), ..Sample::default() }
     }
@@ -738,5 +930,96 @@ mod tests {
         let (bars, peak) = spark_from_low(&[100.0 * MIB, 500.0 * MIB, 516.0 * MIB], 2, 16.0 * MIB);
         assert_eq!(bars, "▁█");
         assert_eq!(peak, 516.0 * MIB);
+    }
+
+    /// A process directory `<root>/<pid>` with the given files, and its root.
+    fn process(name: &str, pid: u32) -> (TempDir, PathBuf) {
+        let root = TempDir::new(&format!("describe-{name}"));
+        let dir = root.join(pid.to_string());
+        fs::create_dir(&dir).unwrap();
+        (root, dir)
+    }
+
+    /// Gives `<root>/<ppid>/comm` and a `status` with that `PPid` to the process at `dir`.
+    fn with_parent(root: &Path, dir: &Path, ppid: u32, comm: &str) {
+        fs::write(dir.join("status"), format!("Name:\tdemo\nPPid:\t{ppid}\nThreads:\t1\n")).unwrap();
+        fs::create_dir(root.join(ppid.to_string())).unwrap();
+        fs::write(root.join(ppid.to_string()).join("comm"), format!("{comm}\n")).unwrap();
+    }
+
+    #[test]
+    fn the_command_line_arguments_are_joined_with_spaces() {
+        let (_root, dir) = process("cmdline", 2000);
+        fs::write(dir.join("cmdline"), b"/usr/bin/demo\0--flag\0value\0").unwrap();
+        assert_eq!(describe(&dir, None).cmdline.as_deref(), Some("/usr/bin/demo --flag value"));
+    }
+
+    #[test]
+    fn an_empty_or_missing_command_line_is_none() {
+        let (_root, dir) = process("nocmd", 2000);
+        assert_eq!(describe(&dir, None).cmdline, None);
+        fs::write(dir.join("cmdline"), b"").unwrap();
+        assert_eq!(describe(&dir, None).cmdline, None);
+    }
+
+    #[test]
+    fn the_working_directory_is_read_from_the_link() {
+        let (_root, dir) = process("cwd", 2000);
+        std::os::unix::fs::symlink("/srv/demo/work", dir.join("cwd")).unwrap();
+        assert_eq!(describe(&dir, None).cwd.as_deref(), Some("/srv/demo/work"));
+    }
+
+    #[test]
+    fn a_home_directory_at_the_start_of_the_working_directory_becomes_a_tilde() {
+        let (_root, dir) = process("home", 2000);
+        let cwd = |target: &str, home: &str| {
+            let _ = fs::remove_file(dir.join("cwd"));
+            std::os::unix::fs::symlink(target, dir.join("cwd")).unwrap();
+            describe(&dir, Some(Path::new(home))).cwd
+        };
+        assert_eq!(cwd("/home/user/src/demo", "/home/user").as_deref(), Some("~/src/demo"));
+        assert_eq!(cwd("/home/user", "/home/user").as_deref(), Some("~"));
+        assert_eq!(cwd("/home/user2/src", "/home/user").as_deref(), Some("/home/user2/src"));
+        assert_eq!(cwd("/srv/src", "/home/user").as_deref(), Some("/srv/src"));
+    }
+
+    #[test]
+    fn the_parents_name_comes_from_the_parents_comm() {
+        let (root, dir) = process("parent", 2000);
+        with_parent(&root, &dir, 1500, "demo-shell");
+        assert_eq!(describe(&dir, None).parent.as_deref(), Some("demo-shell"));
+    }
+
+    #[test]
+    fn each_field_is_none_when_its_file_is_missing_leaving_the_others() {
+        let (root, dir) = process("partial", 2000);
+        with_parent(&root, &dir, 1500, "demo-shell");
+        fs::write(dir.join("cmdline"), b"demo\0").unwrap();
+        // No cwd link.
+        let info = describe(&dir, None);
+        assert_eq!((info.cmdline.as_deref(), info.cwd.as_deref(), info.parent.as_deref()), (Some("demo"), None, Some("demo-shell")));
+
+        // The parent's comm is gone; a status without PPid also gives no parent.
+        fs::remove_file(root.join("1500").join("comm")).unwrap();
+        std::os::unix::fs::symlink("/srv/demo", dir.join("cwd")).unwrap();
+        let info = describe(&dir, None);
+        assert_eq!((info.cmdline.as_deref(), info.cwd.as_deref(), info.parent), (Some("demo"), Some("/srv/demo"), None));
+        fs::write(dir.join("status"), "Name:\tdemo\n").unwrap();
+        assert_eq!(describe(&dir, None).parent, None);
+    }
+
+    #[test]
+    fn a_sampler_on_a_second_process_gives_that_process_not_the_first() {
+        let (_dir, first, uptime) = fake_proc("first-process");
+        let second = first.with_file_name("2000");
+        fs::create_dir(&second).unwrap();
+        fs::write(second.join("stat"), "2000 (demo) S 1 1 1 0 -1 0 0 0 0 0 5 0 0 0 20 0 3 0 3413 0 0\n").unwrap();
+        fs::write(second.join("status"), "Name:\tdemo\nVmRSS:\t2048 kB\nThreads:\t3\n").unwrap();
+        let a = Sampler::new(&first, &uptime).sample(Instant::now());
+        let b = Sampler::new(&second, &uptime).sample(Instant::now());
+        assert_eq!((a.mem, a.threads), (Some(145048 * 1024), Some(17)));
+        assert_eq!((b.mem, b.threads), (Some(2048 * 1024), Some(3)));
+        // 9409.60 s since boot, started 34.13 s after it.
+        assert_eq!(b.uptime, Some(Duration::from_secs_f64(9409.6 - 34.13)));
     }
 }

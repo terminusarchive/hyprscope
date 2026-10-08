@@ -4,12 +4,12 @@ use std::time::Duration;
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::hypr::Snapshot;
-use crate::ui::{BLUE, CYAN, FLAG, MONITOR, MUTED, PANEL_BORDER, width};
+use crate::ui::{BLUE, CYAN, FLAG, MONITOR, MUTED, PANEL_BORDER, title_name, width};
 use crate::usage::{History, Sample, spark, spark_from_low};
 
 
@@ -45,12 +45,12 @@ struct Metric<'a> {
     format: fn(f64) -> String,
 }
 
-pub fn draw(frame: &mut Frame, area: Rect, history: &History, pid: Option<u32>, snap: &Snapshot) {
+pub fn draw(frame: &mut Frame, area: Rect, history: &History, pid: Option<u32>, snap: &Snapshot, number: Option<u8>) {
     let newest = history.iter().last();
     let block = Block::new()
         .borders(Borders::ALL)
         .border_style(Style::new().fg(PANEL_BORDER))
-        .title_top(title(snap, area.width as usize));
+        .title_top(title(snap, area.width as usize, number));
     let body = block.inner(area);
     frame.render_widget(block, area);
 
@@ -63,7 +63,7 @@ pub fn draw(frame: &mut Frame, area: Rect, history: &History, pid: Option<u32>, 
 
 /// The title: the name, then the version, the config provider and `submap: <name>` while
 /// each fits inside the top border with at least one border character after it.
-fn title(snap: &Snapshot, slot_width: usize) -> Line<'static> {
+fn title(snap: &Snapshot, slot_width: usize, number: Option<u8>) -> Line<'static> {
     let value = |t: &str| Span::styled(t.to_string(), Style::new().fg(MONITOR));
     let parts = [
         (!snap.version.is_empty()).then(|| vec![value(&snap.version)]),
@@ -73,9 +73,9 @@ fn title(snap: &Snapshot, slot_width: usize) -> Line<'static> {
     let sep = || Span::styled(" ─ ", Style::new().fg(MUTED));
     // Between the corners, less one border character that must remain.
     let room = slot_width.saturating_sub(3);
-    let mut spans = vec![Span::styled(" Hyprland", Style::new().fg(CYAN).add_modifier(Modifier::BOLD))];
-    // The leading space and name, and the trailing space.
-    let mut used = " Hyprland ".len();
+    let mut spans = title_name("Hyprland", number);
+    // The leading space, the number and the name, and the trailing space.
+    let mut used = spans.iter().map(|s| width(&s.content)).sum::<usize>() + 1;
     for part in parts.into_iter().flatten() {
         used += 3 + part.iter().map(|s| width(&s.content)).sum::<usize>();
         if used > room {
@@ -88,7 +88,7 @@ fn title(snap: &Snapshot, slot_width: usize) -> Line<'static> {
     Line::from(spans)
 }
 
-/// The first line: `pid 1656 · up 5h 12m`, each part left out when unknown.
+/// The first line: `pid 4242 · up 5h 12m`, each part left out when unknown.
 fn process(pid: Option<u32>, newest: Option<&Sample>) -> Line<'static> {
     let muted = Style::new().fg(MUTED);
     let parts = [
@@ -181,17 +181,17 @@ fn line(m: &Metric, width: usize) -> Line<'static> {
 }
 
 /// One decimal below 100, none from 100 up.
-fn percent(v: f64) -> String {
+pub(crate) fn percent(v: f64) -> String {
     if v < 99.95 { format!("{v:.1}%") } else { format!("{v:.0}%") }
 }
 
 /// MiB below 1024 MiB with no decimals, GiB with one above.
-fn bytes(b: f64) -> String {
+pub(crate) fn bytes(b: f64) -> String {
     let mib = b / (1024.0 * 1024.0);
     if mib < 1023.5 { format!("{mib:.0} MiB") } else { format!("{:.1} GiB", mib / 1024.0) }
 }
 
-fn uptime(d: Duration) -> String {
+pub(crate) fn uptime(d: Duration) -> String {
     let s = d.as_secs();
     match s {
         0..60 => format!("{s}s"),
@@ -223,7 +223,7 @@ use crate::ui::{BLUE, FLAG};
 
     fn render_with(history: &History, pid: Option<u32>, snap: &Snapshot, w: u16, h: u16) -> Buffer {
         let mut t = Terminal::new(TestBackend::new(w, h)).unwrap();
-        t.draw(|f| draw(f, f.area(), history, pid, snap)).unwrap();
+        t.draw(|f| draw(f, f.area(), history, pid, snap, None)).unwrap();
         t.backend().buffer().clone()
     }
 
@@ -356,7 +356,7 @@ use crate::ui::{BLUE, FLAG};
     fn titled(version: &str, provider: &str, submap: &str, w: u16) -> String {
         let (mut snap, _) = crate::ui::tests::fixture();
         (snap.version, snap.config_provider, snap.submap) = (version.into(), provider.into(), submap.into());
-        text(&render_with(&history(3, true), Some(1656), &snap, w, 7))[0].clone()
+        text(&render_with(&history(3, true), Some(4242), &snap, w, 7))[0].clone()
     }
 
     #[test]
@@ -380,6 +380,24 @@ use crate::ui::{BLUE, FLAG};
     }
 
     #[test]
+    fn a_panel_with_a_zoomed_view_has_its_number_before_its_name_and_the_parts_make_room_for_it() {
+        let numbered = |version: &str, w: u16| {
+            let (mut snap, _) = crate::ui::tests::fixture();
+            (snap.version, snap.config_provider, snap.submap) = (version.into(), "lua".into(), "default".into());
+            let mut t = Terminal::new(TestBackend::new(w, 7)).unwrap();
+            t.draw(|f| draw(f, f.area(), &history(3, true), Some(4242), &snap, Some(1))).unwrap();
+            t.backend().buffer().clone()
+        };
+        let b = numbered("0.56.2", 57);
+        assert!(text(&b)[0].starts_with("┌ 1 Hyprland ─ 0.56.2 ─ lua ─ submap: default ─"), "{}", text(&b)[0]);
+        assert_eq!(fg_of(&b, "1 Hyprland"), MUTED);
+        assert_eq!(fg_of(&b, "Hyprland ─"), crate::ui::CYAN);
+        // Two columns wider than without the number: 24 shows the version, 23 does not.
+        assert!(text(&numbered("0.56.2", 24))[0].contains("0.56.2"));
+        assert!(!text(&numbered("0.56.2", 23))[0].contains("0.56.2"));
+    }
+
+    #[test]
     fn the_title_follows_the_submap_and_leaves_out_what_is_empty() {
         assert!(titled("0.56.2", "lua", "resize", 57).contains("submap: resize"));
         let top = titled("0.56.2", "", "default", 57);
@@ -397,12 +415,12 @@ use crate::ui::{BLUE, FLAG};
 
     #[test]
     fn the_first_line_shows_the_pid_and_the_uptime_with_muted_labels() {
-        let b = render_at(&history(3, true), Some(1656), 57, 7);
+        let b = render_at(&history(3, true), Some(4242), 57, 7);
         let t = text(&b);
-        assert!(t[1].starts_with("│ pid 1656 · up 1h 52m "), "{}", t[1]);
+        assert!(t[1].starts_with("│ pid 4242 · up 1h 52m "), "{}", t[1]);
         assert_eq!(fg_of(&b, "pid"), MUTED);
         assert_eq!(fg_of(&b, "up "), MUTED);
-        assert_eq!(fg_of(&b, "1656"), Color::Reset);
+        assert_eq!(fg_of(&b, "4242"), Color::Reset);
         assert_eq!(fg_of(&b, "1h 52m"), Color::Reset);
     }
 
@@ -420,8 +438,8 @@ use crate::ui::{BLUE, FLAG};
 
     #[test]
     fn the_five_lines_are_in_order_and_fill_a_seven_row_slot() {
-        let t = text(&render_at(&history(30, true), Some(1656), 57, 7));
-        for (y, want) in [(1, " pid 1656"), (2, " CPU "), (3, " MEM "), (4, " GPU "), (5, " 17 threads")] {
+        let t = text(&render_at(&history(30, true), Some(4242), 57, 7));
+        for (y, want) in [(1, " pid 4242"), (2, " CPU "), (3, " MEM "), (4, " GPU "), (5, " 17 threads")] {
             assert!(t[y].starts_with(&format!("│{want}")), "{y}: {}", t[y]);
         }
         assert!(t[6].starts_with("└──") && t[6].ends_with("──┘"), "{}", t[6]);

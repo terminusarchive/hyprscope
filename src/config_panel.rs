@@ -7,14 +7,14 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::config::Summary;
-use crate::ui::{BAD, CYAN, GOOD, MONITOR, MUTED, PANEL_BORDER, clean, fit, width};
+use crate::ui::{BAD, GOOD, MONITOR, MUTED, PANEL_BORDER, clean, fit, title_name, width};
 
 const SIDE: usize = 1;
 
 /// A run of text in one style.
-type Part = (String, Style);
+pub(crate) type Part = (String, Style);
 
-fn muted(s: &str) -> Part {
+pub(crate) fn muted(s: &str) -> Part {
     (s.into(), Style::new().fg(MUTED))
 }
 
@@ -23,12 +23,12 @@ fn number(n: usize) -> Part {
     (n.to_string(), Style::new().add_modifier(Modifier::BOLD))
 }
 
-fn plain(s: &str) -> Part {
+pub(crate) fn plain(s: &str) -> Part {
     (s.into(), Style::new())
 }
 
 /// `n/a` after the words, for a figure that could not be fetched.
-fn missing(words: &str) -> Vec<Part> {
+pub(crate) fn missing(words: &str) -> Vec<Part> {
     vec![muted(words), (" n/a".into(), Style::new().fg(MUTED).add_modifier(Modifier::BOLD))]
 }
 
@@ -37,19 +37,26 @@ fn counted(n: usize, one: &str, many: &str) -> Vec<Part> {
     vec![number(n), muted(if n == 1 { one } else { many })]
 }
 
-/// The lines, in order, with the first error's text after the error count.
-fn lines(summary: &Summary, reloaded: Option<&str>) -> Vec<Vec<Part>> {
-    let mut out = Vec::new();
-    match &summary.errors {
-        None => out.push(missing("config errors")),
-        Some(errors) if errors.is_empty() => out.push(vec![("✓ no config errors".into(), Style::new().fg(GOOD))]),
+/// Whether the configuration has errors, as the panel and the zoomed view's header say it:
+/// `✓ no config errors` in the good colour, `✗ N config errors` in the bad one, or `n/a`
+/// when they could not be fetched.
+pub(crate) fn verdict(errors: Option<&[String]>) -> Vec<Part> {
+    match errors {
+        None => missing("config errors"),
+        Some([]) => vec![("✓ no config errors".into(), Style::new().fg(GOOD))],
         Some(errors) => {
-            let bad = Style::new().fg(BAD);
             let n = errors.len();
             let noun = if n == 1 { "config error" } else { "config errors" };
-            out.push(vec![(format!("✗ {n} {noun}"), bad)]);
-            out.push(vec![plain(&clean(&errors[0]))]);
+            vec![(format!("✗ {n} {noun}"), Style::new().fg(BAD))]
         }
+    }
+}
+
+/// The lines, in order, with the first error's text after the error count.
+fn lines(summary: &Summary, reloaded: Option<&str>) -> Vec<Vec<Part>> {
+    let mut out = vec![verdict(summary.errors.as_deref())];
+    if let Some([first, ..]) = summary.errors.as_deref() {
+        out.push(vec![plain(&clean(first))]);
     }
     out.push(match summary.options {
         None => missing("options"),
@@ -82,14 +89,15 @@ fn lines(summary: &Summary, reloaded: Option<&str>) -> Vec<Vec<Part>> {
 /// The title: the name, then ` ─ <file>` when it fits inside the top border with a border
 /// character after it. A file too long is shortened from the left with `…`, which keeps
 /// its name; if even `…` and the name do not fit, it is left out.
-fn title(file: Option<&str>, slot_width: usize) -> Line<'static> {
-    let name = Span::styled(" Config", Style::new().fg(CYAN).add_modifier(Modifier::BOLD));
+fn title(file: Option<&str>, slot_width: usize, number: Option<u8>) -> Line<'static> {
+    let name = title_name("Config", number);
+    let named = Line::from(name.clone()).width();
     let Some(file) = file.map(clean).filter(|f| !f.is_empty()) else {
-        return Line::from(vec![name, Span::raw(" ")]);
+        return Line::from([name, vec![Span::raw(" ")]].concat());
     };
     // Between the corners, less one border character that must remain; the leading space,
     // the name, the separator and the trailing space come off what the file may use.
-    let room = slot_width.saturating_sub(3 + " Config ".len() + 3);
+    let room = slot_width.saturating_sub(3 + named + 1 + 3);
     let base = file.rsplit('/').next().unwrap_or(&file);
     let shown = if width(&file) <= room {
         file.clone()
@@ -106,13 +114,13 @@ fn title(file: Option<&str>, slot_width: usize) -> Line<'static> {
         }
         format!("…{}", tail.into_iter().rev().collect::<String>())
     } else {
-        return Line::from(vec![name, Span::raw(" ")]);
+        return Line::from([name, vec![Span::raw(" ")]].concat());
     };
-    Line::from(vec![name, Span::styled(" ─ ", Style::new().fg(MUTED)), Span::styled(shown, Style::new().fg(MONITOR)), Span::raw(" ")])
+    Line::from([name, vec![Span::styled(" ─ ", Style::new().fg(MUTED)), Span::styled(shown, Style::new().fg(MONITOR)), Span::raw(" ")]].concat())
 }
 
 /// The parts cut to display width `w`, the last one shortened with `…` if it overflows.
-fn clip(parts: Vec<Part>, w: usize) -> Line<'static> {
+pub(crate) fn clip(parts: Vec<Part>, w: usize) -> Line<'static> {
     let mut spans = Vec::new();
     let mut used = 0;
     for (text, style) in parts {
@@ -128,11 +136,11 @@ fn clip(parts: Vec<Part>, w: usize) -> Line<'static> {
     Line::from(spans)
 }
 
-pub fn draw(frame: &mut Frame, area: Rect, summary: &Summary, file: Option<&str>, reloaded: Option<&str>) {
+pub fn draw(frame: &mut Frame, area: Rect, summary: &Summary, file: Option<&str>, reloaded: Option<&str>, number: Option<u8>) {
     let block = Block::new()
         .borders(Borders::ALL)
         .border_style(Style::new().fg(PANEL_BORDER))
-        .title_top(title(file, area.width as usize));
+        .title_top(title(file, area.width as usize, number));
     let body = block.inner(area);
     frame.render_widget(block, area);
 
@@ -156,6 +164,7 @@ mod tests {
     use ratatui::backend::TestBackend;
     use ratatui::buffer::Buffer;
     use ratatui::style::Color;
+    use crate::ui::CYAN;
 
     fn render(summary: &Summary, reloaded: Option<&str>, w: u16, h: u16) -> Buffer {
         render_file(summary, None, reloaded, w, h)
@@ -163,7 +172,7 @@ mod tests {
 
     fn render_file(summary: &Summary, file: Option<&str>, reloaded: Option<&str>, w: u16, h: u16) -> Buffer {
         let mut t = Terminal::new(TestBackend::new(w, h)).unwrap();
-        t.draw(|f| draw(f, f.area(), summary, file, reloaded)).unwrap();
+        t.draw(|f| draw(f, f.area(), summary, file, reloaded, None)).unwrap();
         t.backend().buffer().clone()
     }
 
@@ -226,6 +235,20 @@ mod tests {
         assert!(bare.starts_with("┌ Config ──") && !bare.contains("~"), "{bare}");
         let b = render_file(&healthy(), Some("~/h.lua"), None, 57, 7);
         assert_eq!(cell_at(&b, 0, "~/h.lua").fg, crate::ui::MONITOR);
+    }
+
+    #[test]
+    fn a_numbered_title_reads_the_number_first_and_leaves_the_file_two_columns_less() {
+        let file = "~/.config/hypr/hyprland-sessions.lua";
+        let numbered = |w: u16| {
+            let mut t = Terminal::new(TestBackend::new(w, 7)).unwrap();
+            t.draw(|f| draw(f, f.area(), &healthy(), Some(file), None, Some(2))).unwrap();
+            text(t.backend().buffer())[0].clone()
+        };
+        assert!(numbered(57).starts_with("┌ 2 Config ─ ~/.config/hypr/hyprland-sessions.lua ─"), "{}", numbered(57));
+        assert!(numbered(52).contains("─ ~/.config/hypr/hyprland-sessions.lua ─"), "{}", numbered(52));
+        let t = numbered(51);
+        assert!(t.starts_with("┌ 2 Config ─ ….config/hypr/hyprland-sessions.lua ─") && t.chars().count() == 51, "{t}");
     }
 
     #[test]
@@ -397,7 +420,7 @@ mod tests {
     #[test]
     fn it_draws_only_inside_its_area() {
         let mut t = Terminal::new(TestBackend::new(50, 12)).unwrap();
-        t.draw(|f| draw(f, Rect::new(3, 2, 40, 7), &healthy(), Some("~/.config/hypr/hyprland.lua"), None)).unwrap();
+        t.draw(|f| draw(f, Rect::new(3, 2, 40, 7), &healthy(), Some("~/.config/hypr/hyprland.lua"), None, None)).unwrap();
         let b = t.backend().buffer();
         for y in 0..12 {
             for x in 0..50 {

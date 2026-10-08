@@ -83,19 +83,26 @@ status 2.
 
 | Key | Action |
 | --- | --- |
-| `Up`, `k` | Select the previous window. From the first window it goes to the last. |
-| `Down`, `j` | Select the next window. From the last window it goes to the first. |
-| `PageUp` | Select the window one page up. It stops at the first window. |
-| `PageDown` | Select the window one page down. It stops at the last window. |
+| `Up`, `k` | Select the previous window. From the first window it goes to the last. In the Monitors view it selects the previous monitor and stops at the first. In the Events and Log views it scrolls one line toward newer lines. In the Config view it scrolls the list one row up. |
+| `Down`, `j` | Select the next window. From the last window it goes to the first. In the Monitors view it selects the next monitor and stops at the last. In the Events and Log views it scrolls one line toward older lines. In the Config view it scrolls the list one row down. |
+| `PageUp` | Select the window one page up. It stops at the first window. In the Events and Log views it scrolls one page toward newer lines. In the Config view it scrolls the list one page up. |
+| `PageDown` | Select the window one page down. It stops at the last window. In the Events and Log views it scrolls one page toward older lines. In the Config view it scrolls the list one page down. |
+| `Enter` | On the front page, open the Windows view with the inspector. |
+| `1`, `2`, `3`, `4`, `5`, `6` | Open the Hyprland, Config, Windows, Monitors, Events or Log view full-screen, from the front page or another view. |
+| `Tab`, `Right` | In the Config view, open the next tab: Options, Binds, Animations, Devices. `Shift+Tab` and `Left` open the previous one. |
+| `a` | In the Config view's Options tab, switch between the options your configuration sets and every option. |
+| `Space` | In the Events and Log views, pause the list or resume it. |
+| `/` | In the Windows, Events, Log and Config views, filter the list by text (in the Windows view, the tree by class or title): type, then `Enter` keeps the filter and `Esc` clears it. |
+| `l` | In the Log view, step the lowest level shown: warnings and up, errors only, every level. |
+| `r` | In the Events view, show the events as Hyprland sent them, and back. |
+| `Home` | In the Events and Log views, go back to the newest line. In the Config view, go to the first row of the list. |
+| `End` | In the Events and Log views, go to the oldest line, which pauses the view. In the Config view, go to the last row of the list. |
+| `Esc` | From a full-screen view, back to the front page. In the Windows, Events, Log and Config views it first closes the filter prompt, or clears a kept filter. |
 | `q`, `Ctrl-C` | Quit. |
 
-The footer shows only the arrow keys and `q`; the others work as listed.
+## Planned 
 
-## Not yet
-
-- No zooming into a panel for more detail.
-- No filtering or searching.
-- No action on a window: selecting a window changes nothing in Hyprland.
+- tbd
 
 ## Contributing
 
@@ -104,13 +111,3 @@ Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
 ## Licence
 
 MIT. See [LICENSE](LICENSE).
-
-## Regenerating the picture
-
-```sh
-python3 docs/make_screenshot.py
-```
-
-This needs Python 3, `tmux` and the release binary (it builds one if there is none).
-It runs hyprscope for about 75 seconds against an invented stand-in for Hyprland in a
-160x44 terminal, then writes `docs/screenshot.svg`.

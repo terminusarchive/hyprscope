@@ -7,16 +7,16 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::tree::{Flags, Kind, Row};
-use crate::ui::{ACCENT, CYAN, DIM, FLAG, GUIDE, MONITOR, MUTED, PANEL_BORDER, SELECTED, clean, fit, pad, width};
+use crate::ui::{ACCENT, CYAN, DIM, FLAG, GUIDE, MONITOR, MUTED, PANEL_BORDER, SELECTED, clean, counted, fit, pad, title_name, width};
 
 /// Gap between columns.
 const GAP: &str = "  ";
 
-pub fn draw(frame: &mut Frame, area: Rect, rows: &[Row], scroll: usize, selected: Option<usize>) {
+pub fn draw(frame: &mut Frame, area: Rect, rows: &[Row], scroll: usize, selected: Option<usize>, number: Option<u8>, shown: Option<(usize, usize)>) {
     let panel = Block::new()
         .borders(Borders::ALL)
         .border_style(Style::new().fg(PANEL_BORDER))
-        .title_top(Line::from(Span::styled(" Windows ", Style::new().fg(CYAN).add_modifier(Modifier::BOLD))));
+        .title_top(Line::from(title_spans(number, shown)));
     let body = panel.inner(area);
     frame.render_widget(panel, area);
 
@@ -29,6 +29,9 @@ pub fn draw(frame: &mut Frame, area: Rect, rows: &[Row], scroll: usize, selected
         .take(tree.height as usize)
         .map(|r| row_line(r, &cols))
         .collect();
+    if rows.is_empty() && shown.is_some() {
+        frame.render_widget(Paragraph::new(Line::styled(" no windows match", Style::new().fg(DIM))), tree);
+    }
     frame.render_widget(Paragraph::new(lines), tree);
     if let Some(offset) = selected.and_then(|i| i.checked_sub(scroll)).filter(|o| *o < tree.height as usize) {
         let buf = frame.buffer_mut();
@@ -36,6 +39,16 @@ pub fn draw(frame: &mut Frame, area: Rect, rows: &[Row], scroll: usize, selected
             buf[(x, tree.y + offset as u16)].set_bg(SELECTED);
         }
     }
+}
+
+/// ` Windows `, with the panel's number before the name when it has one.
+fn title_spans(number: Option<u8>, shown: Option<(usize, usize)>) -> Vec<Span<'static>> {
+    let mut spans = title_name("Windows", number);
+    if let Some((m, n)) = shown {
+        spans.extend([Span::raw(" ─ "), Span::styled(format!("{m} of {}", counted(n, "window")), Style::new().fg(MUTED))]);
+    }
+    spans.push(Span::raw(" "));
+    spans
 }
 
 /// The window-row columns that are shown, and their widths.
@@ -192,12 +205,39 @@ mod tests {
     /// The panel alone in a slot of `w` by `h`: row 0 is the border, row 1 the heading.
     fn panel_sel(rows: &[Row], scroll: usize, selected: Option<usize>, w: u16, h: u16) -> Buffer {
         let mut t = Terminal::new(TestBackend::new(w, h)).unwrap();
-        t.draw(|f| draw(f, f.area(), rows, scroll, selected)).unwrap();
+        t.draw(|f| draw(f, f.area(), rows, scroll, selected, None, None)).unwrap();
         t.backend().buffer().clone()
     }
 
     fn panel(rows: &[Row], w: u16, h: u16) -> Buffer {
         panel_sel(rows, 0, None, w, h)
+    }
+
+    /// The panel alone with the filter's counts given, 40 by 8.
+    fn counted_panel(rows: &[Row], shown: Option<(usize, usize)>) -> Buffer {
+        let mut t = Terminal::new(TestBackend::new(40, 8)).unwrap();
+        t.draw(|f| draw(f, f.area(), rows, 0, None, None, shown)).unwrap();
+        t.backend().buffer().clone()
+    }
+
+    #[test]
+    fn the_title_counts_the_windows_shown_of_all_only_under_a_filter() {
+        let rows = known();
+        assert!(text(&counted_panel(&rows, Some((2, 17))))[0].starts_with("┌ Windows ─ 2 of 17 windows "), "{}", text(&counted_panel(&rows, Some((2, 17))))[0]);
+        assert!(text(&counted_panel(&rows, Some((1, 1))))[0].starts_with("┌ Windows ─ 1 of 1 window "), "{}", text(&counted_panel(&rows, Some((1, 1))))[0]);
+        assert!(text(&counted_panel(&rows, None))[0].starts_with("┌ Windows ┐") || text(&counted_panel(&rows, None))[0].starts_with("┌ Windows ─"));
+        assert!(!text(&counted_panel(&rows, None))[0].contains(" of "));
+    }
+
+    #[test]
+    fn no_rows_under_a_filter_draw_one_dimmed_line_under_the_heading() {
+        let b = counted_panel(&[], Some((0, 5)));
+        let t = text(&b);
+        assert!(t[0].contains("0 of 5 windows"), "{}", t[0]);
+        assert!(t[1].contains("CLASS"), "{}", t[1]);
+        assert!(t[2].starts_with("│ no windows match"), "{}", t[2]);
+        assert_eq!(fg_of(&b, "no windows match"), DIM);
+        assert!(!text(&counted_panel(&[], None)).iter().any(|l| l.contains("no windows match")));
     }
 
     fn window(class: &str, pid: i64, size: (i64, i64), at: (i64, i64), flags: Flags) -> Row {
@@ -214,7 +254,7 @@ mod tests {
     /// Widths: class 7, pid 4, geometry 19, flags 5 (the heading), so the fixed part of
     /// a row is 1 + 4 + 7 + 5 + two gaps = 21, PID adds 4 + 2, size and position 19 + 2.
     fn known() -> Vec<Row> {
-        vec![window("wezterm", 1656, (1251, 1362), (1287, 56), Flags::default())]
+        vec![window("wezterm", 4242, (1251, 1362), (1287, 56), Flags::default())]
     }
 
     /// The slot's inner width for a panel `w` wide.
@@ -269,7 +309,7 @@ mod tests {
         assert!(t[1].contains("CLASS") && t[1].contains("TITLE") && t[1].contains("FLAGS"), "{}", t[1]);
         assert!(!t[1].contains("PID") && !t[1].contains("SIZE"), "{}", t[1]);
         let all = t.join("\n");
-        assert!(!all.contains("1656") && !all.contains("1251x1362"), "{all}");
+        assert!(!all.contains("4242") && !all.contains("1251x1362"), "{all}");
         assert!(all.contains("emacs") && all.contains("notes.org"));
     }
 
@@ -444,7 +484,7 @@ mod tests {
         let r: Vec<Row> = r.iter().cycle().take(40).cloned().collect();
         let (w, h) = (116, 32);
         let area = Rect::new(0, 0, w, h);
-        let last = r.len() - visible_rows(area, &s);
+        let last = r.len() - visible_rows(area, &s, crate::ui::Screen::Front);
         let t = text(&render(&s, &r, last, w, h));
         let slot = crate::ui::layout(Rect::new(0, 0, w, h), &fixture().0).windows;
         let head = slot.y as usize + 1;
@@ -522,7 +562,7 @@ mod tests {
         let (s, r) = fixture();
         let r: Vec<Row> = r.iter().cycle().take(40).cloned().collect();
         let (w, h) = (116, 32);
-        let page = visible_rows(Rect::new(0, 0, w, h), &fixture().0);
+        let page = visible_rows(Rect::new(0, 0, w, h), &fixture().0, crate::ui::Screen::Front);
         let sel = r.len() - 1;
         let at = r.len() - page;
         let mut t = Terminal::new(TestBackend::new(w, h)).unwrap();

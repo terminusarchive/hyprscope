@@ -7,7 +7,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::hypr::{Monitor, Snapshot};
-use crate::ui::{ACCENT, CYAN, DIM, GOOD, MUTED, PANEL_BORDER, clean, width};
+use crate::ui::{ACCENT, DIM, GOOD, MUTED, PANEL_BORDER, clean, title_name, width};
 
 /// The least a box may be, in columns and rows, before the panel gives up on boxes.
 const MIN_BOX: (u16, u16) = (12, 3);
@@ -23,7 +23,7 @@ pub enum Arrangement {
 
 /// A monitor's size in the layout: its resolution divided by its scale, width and height
 /// swapped when it is turned a quarter.
-fn logical_size(m: &Monitor) -> (f64, f64) {
+pub(crate) fn logical_size(m: &Monitor) -> (f64, f64) {
     let scale = if m.scale.is_finite() && m.scale > 0.0 { m.scale } else { 1.0 };
     let (w, h) = (f64::from(m.width) / scale, f64::from(m.height) / scale);
     if m.transform & 1 == 1 { (h, w) } else { (w, h) }
@@ -89,11 +89,15 @@ pub fn wanted_height(snap: &Snapshot, width: u16, limit: u16) -> u16 {
 
 /// Draws the panel into `area`, border included: a box per monitor placed as the layout
 /// places them, at the top left of the inside, or a list when the boxes would be too small.
-pub fn draw(frame: &mut Frame, area: Rect, snap: &Snapshot) {
+pub fn draw(frame: &mut Frame, area: Rect, snap: &Snapshot, number: Option<u8>) {
     let panel = Block::new()
         .borders(Borders::ALL)
         .border_style(Style::new().fg(PANEL_BORDER))
-        .title_top(Line::from(Span::styled(" Monitors ", Style::new().fg(CYAN).add_modifier(Modifier::BOLD))));
+        .title_top(Line::from({
+            let mut spans = title_name("Monitors", number);
+            spans.push(Span::raw(" "));
+            spans
+        }));
     let inner = panel.inner(area);
     frame.render_widget(panel, area);
     // One column of margin on each side.
@@ -116,10 +120,10 @@ pub fn draw(frame: &mut Frame, area: Rect, snap: &Snapshot) {
     }
 }
 
-type Segments = Vec<(String, Style)>;
+pub(crate) type Segments = Vec<(String, Style)>;
 
 /// `segments` as one line no wider than `w`, ending in `…` where it was cut.
-fn line(segments: Segments, w: usize) -> Line<'static> {
+pub(crate) fn line(segments: Segments, w: usize) -> Line<'static> {
     let total: usize = segments.iter().map(|(t, _)| width(t)).sum();
     if total <= w {
         return Line::from(segments.into_iter().map(|(t, s)| Span::styled(t, s)).collect::<Vec<_>>());
@@ -149,18 +153,18 @@ fn line(segments: Segments, w: usize) -> Line<'static> {
     if w == 0 { Line::default() } else { Line::from(spans) }
 }
 
-fn name_style(m: &Monitor) -> Style {
+pub(crate) fn name_style(m: &Monitor) -> Style {
     let style = Style::new().add_modifier(Modifier::BOLD);
     if m.focused { style.fg(ACCENT) } else { style }
 }
 
 /// Resolution and refresh rate: `3840x2160@60`.
-fn mode(m: &Monitor) -> String {
+pub(crate) fn mode(m: &Monitor) -> String {
     format!("{}x{}@{:.0}", m.width, m.height, m.refresh_rate)
 }
 
 /// Scale with at most two decimals and no trailing zeros: `x1`, `x1.5`, `x1.67`.
-fn scale(m: &Monitor) -> String {
+pub(crate) fn scale(m: &Monitor) -> String {
     format!("x{}", (m.scale * 100.0).round() / 100.0)
 }
 
@@ -170,7 +174,7 @@ fn windows(n: u32) -> String {
 
 /// The workspace with id `id` as `<label> <name> · <n> windows`; the name alone when the
 /// snapshot does not list it, as then the count is not known.
-fn workspace_line(label: &str, id: i64, snap: &Snapshot) -> Segments {
+pub(crate) fn workspace_line(label: &str, id: i64, snap: &Snapshot) -> Segments {
     let found = snap.workspaces.iter().find(|w| w.id == id);
     let name = found.map_or_else(|| id.to_string(), |w| clean(w.name.strip_prefix("special:").unwrap_or(&w.name)));
     let mut out = vec![(format!("{label} "), Style::new().fg(MUTED)), (name, Style::new())];
@@ -191,15 +195,10 @@ fn status_line(m: &Monitor) -> Segments {
     out
 }
 
-fn draw_box(frame: &mut Frame, rect: Rect, m: &Monitor, snap: &Snapshot) {
-    let border = if m.focused { ACCENT } else { PANEL_BORDER };
-    let block = Block::bordered().border_style(Style::new().fg(border));
-    let inside = block.inner(rect);
-    frame.render_widget(block, rect);
-    // One column of space between the border and the text.
-    let text = Rect::new(inside.x + 1.min(inside.width), inside.y, inside.width.saturating_sub(2), inside.height);
+/// The lines a box holds under the monitor's name: mode, scale, workspace, the special
+/// workspace while one shows, and the three marks.
+pub(crate) fn info_rows(m: &Monitor, snap: &Snapshot) -> Vec<Segments> {
     let mut rows: Vec<Segments> = vec![
-        vec![(clean(&m.name), name_style(m))],
         vec![(mode(m), Style::new().fg(MUTED))],
         vec![(scale(m), Style::new().fg(MUTED))],
         workspace_line("workspace", m.active_workspace, snap),
@@ -208,12 +207,28 @@ fn draw_box(frame: &mut Frame, rect: Rect, m: &Monitor, snap: &Snapshot) {
         rows.push(workspace_line("special", m.special_workspace, snap));
     }
     rows.push(status_line(m));
+    rows
+}
+
+/// Writes `rows` into `inside` (a box's inner rectangle), one column in from each side.
+pub(crate) fn draw_rows(frame: &mut Frame, inside: Rect, rows: Vec<Segments>) {
+    let text = Rect::new(inside.x + 1.min(inside.width), inside.y, inside.width.saturating_sub(2), inside.height);
     let lines: Vec<Line> = rows.into_iter().map(|r| line(r, text.width as usize)).collect();
     frame.render_widget(Paragraph::new(lines), text);
 }
 
+fn draw_box(frame: &mut Frame, rect: Rect, m: &Monitor, snap: &Snapshot) {
+    let border = if m.focused { ACCENT } else { PANEL_BORDER };
+    let block = Block::bordered().border_style(Style::new().fg(border));
+    let inside = block.inner(rect);
+    frame.render_widget(block, rect);
+    let mut rows = vec![vec![(clean(&m.name), name_style(m))]];
+    rows.extend(info_rows(m, snap));
+    draw_rows(frame, inside, rows);
+}
+
 /// One monitor on one line: name, resolution and refresh rate, scale, active workspace.
-fn list_line(m: &Monitor, snap: &Snapshot, w: usize) -> Line<'static> {
+pub(crate) fn list_line(m: &Monitor, snap: &Snapshot, w: usize) -> Line<'static> {
     let workspace = snap.workspaces.iter().find(|ws| ws.id == m.active_workspace).map_or(m.active_workspace.to_string(), |ws| clean(&ws.name));
     let muted = Style::new().fg(MUTED);
     line(
@@ -228,6 +243,7 @@ fn list_line(m: &Monitor, snap: &Snapshot, w: usize) -> Line<'static> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui::CYAN;
 
     fn mon(x: i64, y: i64, w: u32, h: u32, scale: f64, transform: i64) -> Monitor {
         Monitor {
@@ -246,6 +262,7 @@ mod tests {
             vrr: false,
             actively_tearing: false,
             direct_scanout: false,
+            ..Default::default()
         }
     }
 
@@ -399,7 +416,7 @@ mod tests {
 
     fn render_at(snap: &Snapshot, w: u16, h: u16) -> Buffer {
         let mut t = Terminal::new(TestBackend::new(w, h)).unwrap();
-        t.draw(|f| draw(f, f.area(), snap)).unwrap();
+        t.draw(|f| draw(f, f.area(), snap, None)).unwrap();
         t.backend().buffer().clone()
     }
 
@@ -616,7 +633,7 @@ mod tests {
                 for h in (0..4).chain((4..=20).step_by(2)) {
                     let area = Rect::new(2, 1, w, h);
                     let mut t = Terminal::new(TestBackend::new(70, 24)).unwrap();
-                    t.draw(|f| draw(f, area, &snap)).unwrap();
+                    t.draw(|f| draw(f, area, &snap, None)).unwrap();
                     let b = t.backend().buffer();
                     for y in 0..24 {
                         for x in 0..70 {

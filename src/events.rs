@@ -263,6 +263,21 @@ pub fn interpret(line: &str, names: &Names) -> Option<Entry> {
 const DEFAULT_SHOWN: usize = 5;
 /// How many seconds of counts `per_second` gives.
 pub const SECONDS: usize = 16;
+/// How many events a feed keeps.
+const KEPT: usize = 2000;
+/// How many seconds of counts a feed keeps.
+pub const HISTORY: usize = 512;
+
+/// One event as it arrived.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Kept {
+    /// Counts up from 1 and never goes back, so a line can be found again.
+    pub seq: u64,
+    pub time: String,
+    pub raw: String,
+    /// What the front page would show, with window names as known on arrival.
+    pub entry: Option<Entry>,
+}
 
 /// One line of the panel.
 #[derive(Debug, Clone, PartialEq)]
@@ -286,11 +301,23 @@ pub struct Feed {
     shown: usize,
     /// Events received in each second that had any, oldest first.
     seconds: VecDeque<(u64, u32)>,
+    /// Oldest first, at most `KEPT`.
+    kept: VecDeque<Kept>,
+    next_seq: u64,
+    /// Events with an entry since the start, by kind.
+    counts: HashMap<String, (Family, u64)>,
 }
 
 impl Default for Feed {
     fn default() -> Self {
-        Feed { names: Names::default(), lines: Vec::new(), shown: DEFAULT_SHOWN, seconds: VecDeque::new() }
+        Feed {
+            names: Names::default(),
+            lines: Vec::new(), shown: DEFAULT_SHOWN,
+            seconds: VecDeque::new(),
+            kept: VecDeque::new(),
+            next_seq: 1,
+            counts: HashMap::new(),
+        }
     }
 }
 
@@ -317,13 +344,22 @@ impl Feed {
             Some(last) if last.0 == second => last.1 += 1,
             _ => self.seconds.push_back((second, 1)),
         }
-        while self.seconds.front().is_some_and(|f| f.0 + SECONDS as u64 <= second) {
+        while self.seconds.front().is_some_and(|f| f.0 + HISTORY as u64 <= second) {
             self.seconds.pop_front();
         }
 
         self.names.learn(line);
-        let Some(entry) = interpret(line, &self.names) else { return };
+        let entry = interpret(line, &self.names);
         let time = time.to_string();
+        if !line.is_empty() {
+            if self.kept.len() == KEPT {
+                self.kept.pop_front();
+            }
+            self.kept.push_back(Kept { seq: self.next_seq, time: time.clone(), raw: line.to_string(), entry: entry.clone() });
+            self.next_seq += 1;
+        }
+        let Some(entry) = entry else { return };
+        self.counts.entry(entry.kind.clone()).or_insert((entry.family, 0)).1 += 1;
         match self.lines.iter_mut().find(|l| l.kind == entry.kind && l.subject == entry.subject) {
             Some(shown) => {
                 shown.time = time;
@@ -361,11 +397,29 @@ impl Feed {
     /// last. The second in progress is left out.
     pub fn per_second(&self, now: u64) -> [u32; SECONDS] {
         let mut counts = [0; SECONDS];
-        for (i, count) in counts.iter_mut().enumerate() {
-            let Some(second) = now.checked_sub((SECONDS - i) as u64) else { continue };
-            *count = self.seconds.iter().filter(|s| s.0 == second).map(|s| s.1).sum();
-        }
+        counts.copy_from_slice(&self.history(now, SECONDS));
         counts
+    }
+
+    /// Events received in each of the last `n` (at most `HISTORY`) full seconds before
+    /// `now`, newest last.
+    pub fn history(&self, now: u64, n: usize) -> Vec<u32> {
+        (0..n)
+            .map(|i| {
+                let Some(second) = now.checked_sub((n - i) as u64) else { return 0 };
+                self.seconds.iter().filter(|s| s.0 == second).map(|s| s.1).sum()
+            })
+            .collect()
+    }
+
+    /// The kept events, oldest first.
+    pub fn kept(&self) -> &VecDeque<Kept> {
+        &self.kept
+    }
+
+    /// Each kind seen since the start with its family and count, in no set order.
+    pub fn kinds(&self) -> Vec<(&str, Family, u64)> {
+        self.counts.iter().map(|(k, v)| (k.as_str(), v.0, v.1)).collect()
     }
 }
 
@@ -809,8 +863,8 @@ mod tests {
         // Seconds before the counter started are zero, not a panic.
         assert_eq!(f.per_second(2), [0; 16]);
         // Old seconds fall off.
-        f.push("a>>1", "t", 200);
-        assert_eq!(f.per_second(201)[15], 1);
+        f.push("a>>1", "t", 700);
+        assert_eq!(f.per_second(701)[15], 1);
         assert_eq!(f.seconds.len(), 1);
     }
 
@@ -951,5 +1005,100 @@ mod tests {
         f.lines[0].count = u32::MAX;
         f.push("submap>>a", "t", 1);
         assert_eq!(f.lines()[0].count, u32::MAX);
+    }
+
+    // --- Kept events, counts per kind, history ---
+
+    #[test]
+    fn every_line_is_kept_with_time_raw_text_and_a_growing_sequence_number() {
+        let mut f = Feed::new();
+        f.push("submap>>a", "09:00:01", 1);
+        f.push("submap>>b", "09:00:02", 2);
+        let kept: Vec<_> = f.kept().iter().map(|k| (k.seq, k.time.as_str(), k.raw.as_str())).collect();
+        assert_eq!(kept, [(1, "09:00:01", "submap>>a"), (2, "09:00:02", "submap>>b")]);
+    }
+
+    #[test]
+    fn the_older_form_of_a_pair_is_kept_without_an_entry_and_unknown_kinds_with_one() {
+        let mut f = Feed::new();
+        f.push("windowtitle>>5609f16c9870", "t", 1);
+        f.push("windowtitlev2>>5609f16c9870,x", "t", 1);
+        f.push("brandnew>>stuff", "t", 1);
+        f.push("", "t", 1);
+        let got: Vec<_> = f.kept().iter().map(|k| k.entry.as_ref().map(|e| e.kind.clone())).collect();
+        assert_eq!(got, [None, Some("windowtitle".to_string()), Some("brandnew".to_string())]);
+        // An empty line is no event, though it still counts toward the rate.
+        assert_eq!(f.per_second(2)[SECONDS - 1], 4);
+    }
+
+    #[test]
+    fn the_2001st_event_drops_the_first_and_sequence_numbers_go_on() {
+        let mut f = Feed::new();
+        for i in 0..=KEPT {
+            f.push(&format!("submap>>{i}"), "t", 1);
+        }
+        assert_eq!(f.kept().len(), KEPT);
+        assert_eq!(f.kept().front().unwrap().seq, 2);
+        assert_eq!(f.kept().back().unwrap().seq, KEPT as u64 + 1);
+    }
+
+    #[test]
+    fn a_kept_entry_names_the_window_as_it_was_when_the_event_arrived() {
+        let mut f = Feed::new();
+        f.push("openwindow>>a1,1,term,First", "t", 1);
+        f.push("activewindowv2>>a1", "t", 1);
+        f.push("windowtitlev2>>a1,Second", "t", 1);
+        let first = f.kept()[1].entry.as_ref().unwrap().payload.clone();
+        assert_eq!(first, "term  First");
+        assert_eq!(f.kept()[2].entry.as_ref().unwrap().payload, "term  Second");
+        assert_eq!(f.kept()[1].entry.as_ref().unwrap().payload, first);
+    }
+
+    #[test]
+    fn kinds_count_a_pair_once_count_unknown_kinds_and_go_past_the_ring() {
+        let mut f = Feed::new();
+        f.push("windowtitle>>a", "t", 1);
+        f.push("windowtitlev2>>a,x", "t", 1);
+        f.push("brandnew>>1", "t", 1);
+        f.push("brandnew>>2", "t", 1);
+        let mut kinds = f.kinds();
+        kinds.sort_by(|a, b| a.0.cmp(b.0));
+        assert_eq!(kinds, [("brandnew", Family::Unknown, 2), ("windowtitle", Family::State, 1)]);
+        for i in 0..KEPT + 10 {
+            f.push(&format!("submap>>{i}"), "t", 1);
+        }
+        let submaps = f.kinds().into_iter().find(|k| k.0 == "submap").unwrap().2;
+        assert_eq!(submaps, KEPT as u64 + 10);
+    }
+
+    #[test]
+    fn per_second_counts_reach_back_512_seconds() {
+        let mut f = Feed::new();
+        f.push("submap>>a", "t", 10);
+        f.push("submap>>a", "t", 10);
+        f.push("submap>>a", "t", 600);
+        let h = f.history(601, 512);
+        assert_eq!(h.len(), 512);
+        assert_eq!(h[511], 1);
+        // Second 10 is 591 back, beyond 512, and is gone.
+        assert_eq!(h.iter().sum::<u32>(), 1);
+        f.push("submap>>a", "t", 700);
+        assert_eq!(f.history(701, 512)[0], 0);
+        assert_eq!(f.history(601, 512).iter().sum::<u32>(), 1);
+        assert_eq!(f.history(3, 8), [0; 8]);
+    }
+
+    #[test]
+    fn a_second_up_to_511_back_is_still_answered() {
+        let mut f = Feed::new();
+        f.push("submap>>a", "t", 100);
+        f.push("submap>>a", "t", 611);
+        assert_eq!(f.history(612, 512)[0], 1);
+        assert_eq!(f.per_second(612), {
+            let mut want = [0; SECONDS];
+            want[SECONDS - 1] = 1;
+            want
+        });
+        assert_eq!(f.rate(612), 1);
     }
 }

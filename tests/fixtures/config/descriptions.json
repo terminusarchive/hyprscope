@@ -1,0 +1,110 @@
+[
+ {
+  "name": "general:border_size",
+  "description": "size of the border around windows",
+  "default": 1,
+  "current": 1,
+  "min": 0,
+  "max": 20,
+  "map": null
+ },
+ {
+  "name": "general:gaps_in",
+  "description": "gaps between windows",
+  "default": "5 5 5 5",
+  "current": "5 5 5 5",
+  "min": null,
+  "max": null
+ },
+ {
+  "name": "general:gaps_workspaces",
+  "description": "gaps between workspaces. Stacks with gaps_out.",
+  "default": 0,
+  "current": 0,
+  "min": 0,
+  "max": 100,
+  "map": null
+ },
+ {
+  "name": "general:col.active_border",
+  "description": "border color for the active window",
+  "default": "ffffffff 0deg",
+  "current": "ffffffff 0deg"
+ },
+ {
+  "name": "general:layout",
+  "description": "which layout to use. [dwindle/master/scrolling/monocle/lua:<name>]",
+  "default": "dwindle",
+  "current": "dwindle"
+ },
+ {
+  "name": "general:resize_on_border",
+  "description": "enables resizing windows by clicking and dragging on borders and gaps",
+  "default": false,
+  "current": false
+ },
+ {
+  "name": "decoration:rounding_power",
+  "description": "rounding power of corners (2 is a circle)",
+  "default": 2,
+  "current": 0,
+  "min": 2,
+  "max": 10
+ },
+ {
+  "name": "decoration:shadow:offset",
+  "description": "shadow's rendering offset.",
+  "default": [
+   0,
+   0
+  ],
+  "current": [
+   0,
+   0
+  ]
+ },
+ {
+  "name": "decoration:blur:vibrancy",
+  "description": "Increase saturation of blurred colors.",
+  "default": 0.1696,
+  "current": 0,
+  "min": 0,
+  "max": 1
+ },
+ {
+  "name": "input:kb_model",
+  "description": "Appropriate XKB keymap parameter.",
+  "default": "[[EMPTY]]",
+  "current": "[[EMPTY]]"
+ },
+ {
+  "name": "group:groupbar:font_weight_active",
+  "description": "weight of the font used to display active groupbar titles",
+  "default": "400",
+  "current": "400"
+ },
+ {
+  "name": "group:groupbar:text_color",
+  "description": "color for window titles in the groupbar",
+  "default": "ffffffff",
+  "current": "ffffffff"
+ },
+ {
+  "name": "group:groupbar:text_color_inactive",
+  "description": "color for inactive windows' titles in the groupbar",
+  "default": "-1",
+  "current": "-1"
+ },
+ {
+  "name": "misc:background_color",
+  "description": "change the background color. (requires enabled disable_hyprland_logo)",
+  "default": "ff111111",
+  "current": "ff111111"
+ },
+ {
+  "name": "misc:col.splash",
+  "description": "Changes the color of the splash text (requires a monitor reload to take effect).",
+  "default": "55ffffff",
+  "current": "55ffffff"
+ }
+]

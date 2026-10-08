@@ -1,0 +1,83 @@
+[
+ [
+  {
+   "name": "specialWorkspaceOut",
+   "overridden": false,
+   "bezier": "",
+   "enabled": true,
+   "speed": 0.0,
+   "style": ""
+  },
+  {
+   "name": "workspacesIn",
+   "overridden": true,
+   "bezier": "almostLinear",
+   "enabled": true,
+   "speed": 1.21,
+   "style": "fade"
+  },
+  {
+   "name": "border",
+   "overridden": true,
+   "bezier": "easeOutQuint",
+   "enabled": true,
+   "speed": 5.39,
+   "style": ""
+  },
+  {
+   "name": "global",
+   "overridden": true,
+   "bezier": "default",
+   "enabled": true,
+   "speed": 10.0,
+   "style": ""
+  },
+  {
+   "name": "windows",
+   "overridden": true,
+   "bezier": "spring:easy",
+   "enabled": true,
+   "speed": 4.79,
+   "style": ""
+  },
+  {
+   "name": "shadowangle",
+   "overridden": true,
+   "bezier": "default",
+   "enabled": false,
+   "speed": 1.0,
+   "style": ""
+  },
+  {
+   "name": "glowangle",
+   "overridden": true,
+   "bezier": "default",
+   "enabled": false,
+   "speed": 1.0,
+   "style": ""
+  }
+ ],
+ [
+  {
+   "name": "quick",
+   "X0": 0.15,
+   "Y0": 0.0,
+   "X1": 0.1,
+   "Y1": 1.0
+  },
+  {
+   "name": "almostLinear",
+   "X0": 0.5,
+   "Y0": 0.5,
+   "X1": 0.75,
+   "Y1": 1.0
+  },
+  {
+   "name": "default",
+   "X0": 0.0,
+   "Y0": 0.75,
+   "X1": 0.15,
+   "Y1": 1.0
+  }
+ ]
+]

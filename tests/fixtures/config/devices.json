@@ -1,0 +1,53 @@
+{
+ "mice": [
+  {
+   "name": "example-mouse",
+   "defaultSpeed": 0.0,
+   "scrollFactor": -1.0
+  },
+  {
+   "name": "example-touchpad",
+   "defaultSpeed": 0.0,
+   "scrollFactor": -1.0
+  }
+ ],
+ "keyboards": [
+  {
+   "name": "example-keyboard-consumer-control",
+   "rules": "",
+   "model": "",
+   "layout": "us",
+   "variant": "",
+   "options": "",
+   "active_layout_index": 0,
+   "active_keymap": "English (US)",
+   "capsLock": false,
+   "numLock": false,
+   "main": false
+  },
+  {
+   "name": "example-keyboard",
+   "rules": "",
+   "model": "",
+   "layout": "us",
+   "variant": "",
+   "options": "",
+   "active_layout_index": 0,
+   "active_keymap": "English (US)",
+   "capsLock": false,
+   "numLock": false,
+   "main": false
+  }
+ ],
+ "tablets": [],
+ "touch": [
+  {
+   "name": "example-touchscreen"
+  }
+ ],
+ "switches": [
+  {
+   "name": "Lid Switch"
+  }
+ ]
+}

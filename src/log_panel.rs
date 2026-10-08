@@ -3,12 +3,12 @@
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::log::{Level, Log, Tally};
-use crate::ui::{ACCENT, BAD, CYAN, DIM, MUTED, PANEL_BORDER, clean, fit, pad, width};
+use crate::ui::{ACCENT, BAD, DIM, MUTED, PANEL_BORDER, clean, fit, pad, title_name, width};
 
 /// The space at each side inside the border.
 const SIDE: usize = 1;
@@ -19,12 +19,12 @@ const GAP: usize = 1;
 /// The most a count shows exactly; more is `×9999+`.
 const MAX_COUNT: u32 = 9999;
 
-pub fn draw(frame: &mut Frame, area: Rect, log: &Log) {
+pub fn draw(frame: &mut Frame, area: Rect, log: &Log, number: Option<u8>) {
     let tally = log.available().then(|| log.tally());
     let block = Block::new()
         .borders(Borders::ALL)
         .border_style(Style::new().fg(PANEL_BORDER))
-        .title_top(title(tally, area.width.saturating_sub(2) as usize));
+        .title_top(title(tally, area.width.saturating_sub(2) as usize, number));
     let body = block.inner(area);
     frame.render_widget(block, area);
 
@@ -44,12 +44,10 @@ fn note(text: &'static str, colour: Color) -> Line<'static> {
 }
 
 /// The panel title: the name, then each count that fits in `room` columns.
-fn title(tally: Option<&Tally>, room: usize) -> Line<'static> {
-    let mut spans = vec![Span::styled(
-        " Log ",
-        Style::new().fg(CYAN).add_modifier(Modifier::BOLD),
-    )];
-    let mut used = width(" Log ");
+pub(crate) fn title(tally: Option<&Tally>, room: usize, number: Option<u8>) -> Line<'static> {
+    let mut spans = title_name("Log", number);
+    spans.push(Span::raw(" "));
+    let mut used = Line::from(spans.clone()).width();
     let Some(tally) = tally else {
         return Line::from(spans);
     };
@@ -118,7 +116,8 @@ mod tests {
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use ratatui::buffer::Buffer;
-    use ratatui::style::Color;
+    use ratatui::style::{Color, Modifier};
+    use crate::ui::CYAN;
 
     /// A log that has been polled once over `text`, or one that is missing for `None`.
     fn log(text: Option<&str>) -> Log {
@@ -134,7 +133,7 @@ mod tests {
 
     fn render(log: &Log, w: u16, h: u16) -> Buffer {
         let mut t = Terminal::new(TestBackend::new(w, h)).unwrap();
-        t.draw(|f| draw(f, f.area(), log)).unwrap();
+        t.draw(|f| draw(f, f.area(), log, None)).unwrap();
         t.backend().buffer().clone()
     }
 

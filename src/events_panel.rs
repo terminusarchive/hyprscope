@@ -2,19 +2,19 @@
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::events::{self, Family, Feed};
-use crate::ui::{ACCENT, BAD, BLUE, CYAN, FLAG, GOOD, MONITOR, MUTED, PANEL_BORDER, clean, fit, pad, width};
+use crate::ui::{ACCENT, BAD, BLUE, CYAN, FLAG, GOOD, MONITOR, MUTED, PANEL_BORDER, clean, fit, pad, title_name, width};
 use crate::usage::spark;
 
 /// Bars never scale below this many events a second, so one or two stay low.
 const BAR_FLOOR: f64 = 4.0;
-const GAP: &str = "  ";
+pub(crate) const GAP: &str = "  ";
 /// `HH:MM:SS`.
-const TIME: usize = 8;
+pub(crate) const TIME: usize = 8;
 /// The most a count shows exactly; more is `×99999+`.
 const MAX_COUNT: u32 = 99_999;
 /// The count's slot: wide enough for `×99999+`.
@@ -22,13 +22,13 @@ const COUNT: usize = 7;
 /// Space between the payload and the count slot.
 const COUNT_GAP: usize = 1;
 /// The space at each side inside the border.
-const SIDE: usize = 1;
+pub(crate) const SIDE: usize = 1;
 
-pub fn draw(frame: &mut Frame, area: Rect, feed: &Feed, now: u64) {
+pub fn draw(frame: &mut Frame, area: Rect, feed: &Feed, now: u64, number: Option<u8>) {
     let block = Block::new()
         .borders(Borders::ALL)
         .border_style(Style::new().fg(PANEL_BORDER))
-        .title_top(title(feed, now));
+        .title_top(title(feed, now, number));
     let body = block.inner(area);
     frame.render_widget(block, area);
 
@@ -48,7 +48,7 @@ pub fn draw(frame: &mut Frame, area: Rect, feed: &Feed, now: u64) {
                 Span::raw(" "),
                 Span::styled(pad(&l.time, TIME), muted),
                 Span::raw(GAP),
-                Span::styled(fit(&clean(&l.kind), kind_width), Style::new().fg(colour(l))),
+                Span::styled(fit(&clean(&l.kind), kind_width), Style::new().fg(colour(l.family, &l.kind))),
                 Span::raw(GAP),
                 Span::raw(fit(&clean(&l.payload), payload_width)),
                 Span::raw(" ".repeat(COUNT_GAP)),
@@ -60,18 +60,21 @@ pub fn draw(frame: &mut Frame, area: Rect, feed: &Feed, now: u64) {
 }
 
 /// The panel title: name, a bar for each of the last sixteen seconds, and the last rate.
-fn title(feed: &Feed, now: u64) -> Line<'static> {
+fn title(feed: &Feed, now: u64, number: Option<u8>) -> Line<'static> {
     let counts: Vec<f64> = feed.per_second(now).iter().map(|&n| f64::from(n)).collect();
     let (bars, _) = spark(&counts, events::SECONDS, BAR_FLOOR);
-    Line::from(vec![
-        Span::styled(" Events ", Style::new().fg(CYAN).add_modifier(Modifier::BOLD)),
+    let mut spans = title_name("Events", number);
+    spans.extend([
+        Span::raw(" "),
         Span::styled(bars, Style::new().fg(CYAN)),
         Span::styled(format!(" {}/s ", feed.rate(now)), Style::new().fg(MUTED)),
-    ])
+    ]);
+    Line::from(spans)
 }
 
-fn colour(line: &events::Line) -> Color {
-    match (line.family, line.kind.as_str()) {
+/// The colour of a kind of event, by its family.
+pub(crate) fn colour(family: Family, kind: &str) -> Color {
+    match (family, kind) {
         (_, "closewindow" | "kill") => BAD,
         (Family::Focus, _) => CYAN,
         (Family::Open, _) => GOOD,
@@ -92,7 +95,7 @@ mod tests {
 
     fn render(feed: &Feed, now: u64, w: u16) -> Buffer {
         let mut t = Terminal::new(TestBackend::new(w, crate::grid::STRIP_HEIGHT)).unwrap();
-        t.draw(|f| draw(f, f.area(), feed, now)).unwrap();
+        t.draw(|f| draw(f, f.area(), feed, now, None)).unwrap();
         t.backend().buffer().clone()
     }
 
@@ -124,7 +127,7 @@ mod tests {
         }
         for rows in [7u16, 9, 14] {
             let mut t = Terminal::new(TestBackend::new(76, rows)).unwrap();
-            t.draw(|fr| draw(fr, fr.area(), &f, 101)).unwrap();
+            t.draw(|fr| draw(fr, fr.area(), &f, 101, None)).unwrap();
             let t = text(t.backend().buffer());
             let shown = t.iter().filter(|l| l.contains("openwindow")).count();
             assert_eq!(shown, rows as usize - 2, "{rows} rows");
@@ -142,7 +145,7 @@ mod tests {
         assert!(t[6].starts_with("└──") && t[6].ends_with("──┘"), "{}", t[6]);
         assert_eq!(b[(0, 0)].fg, PANEL_BORDER);
         assert_eq!(fg_at(&b, 0, "Events"), CYAN);
-        assert!(b[(2, 0)].modifier.contains(Modifier::BOLD));
+        assert!(b[(2, 0)].modifier.contains(ratatui::style::Modifier::BOLD));
     }
 
     #[test]
@@ -329,7 +332,7 @@ mod tests {
         let f = feed(&["submap>>a", "openwindow>>a,1,c,t"]);
         for w in [0, 1, 2, 5, 20, 30, 40] {
             let mut t = Terminal::new(TestBackend::new(w, crate::grid::STRIP_HEIGHT)).unwrap();
-            t.draw(|f2| draw(f2, f2.area(), &f, 101)).unwrap();
+            t.draw(|f2| draw(f2, f2.area(), &f, 101, None)).unwrap();
         }
     }
 }

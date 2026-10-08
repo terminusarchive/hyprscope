@@ -19,7 +19,7 @@ pub struct Snapshot {
     pub focused: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Monitor {
     pub id: i64,
     pub name: String,
@@ -40,7 +40,40 @@ pub struct Monitor {
     pub actively_tearing: bool,
     /// A window is being scanned out directly (`directScanoutTo` is not `"0"`).
     pub direct_scanout: bool,
+    pub description: String,
+    /// Physical size in millimetres.
+    pub physical_size: (u32, u32),
+    /// Pixel format, such as `XRGB8888`; empty when absent.
+    pub format: String,
+    /// Colour management preset, such as `srgb`; empty when absent.
+    pub color_preset: String,
+    pub dpms: bool,
+    /// Area reserved on each edge, in Hyprland's order: left, top, right, bottom. Confirmed
+    /// in Hyprland 0.56.2 `src/debug/HyprCtl.cpp`, which writes `reservedArea.left()`,
+    /// `.top()`, `.right()`, `.bottom()` in that order (a bar on top of a live monitor
+    /// reads `[0, 34, 0, 0]`).
+    pub reserved: [i64; 4],
+    /// The monitor has a solitary window (`solitary` is not `"0"`).
+    pub solitary: bool,
+    /// Available modes as Hyprland writes them, such as `3200x2000@120.00Hz`.
+    pub modes: Vec<String>,
+    /// Reason codes; empty when nothing blocks or the reply has none (before Hyprland 0.51).
+    pub solitary_blocked_by: Vec<String>,
+    pub tearing_blocked_by: Vec<String>,
+    pub direct_scanout_blocked_by: Vec<String>,
 }
+
+/// A layer surface on one monitor.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LayerSurface {
+    pub namespace: String,
+    pub w: u32,
+    pub h: u32,
+}
+
+/// Layer surfaces per monitor name. The four lists are the levels, indexed 0 background,
+/// 1 bottom, 2 top, 3 overlay.
+pub type Layers = std::collections::HashMap<String, [Vec<LayerSurface>; 4]>;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Workspace {
@@ -68,6 +101,20 @@ pub struct Window {
     pub workspace_name: String,
     /// Id of the monitor the window is on.
     pub monitor_id: i64,
+    /// Hyprland's fullscreen state: 0 none, 1 maximised, 2 fullscreen, 3 both. `fullscreen`
+    /// above is this being non-zero.
+    pub fullscreen_state: i64,
+    /// The fullscreen state the window asked for, in the same codes.
+    pub fullscreen_client: i64,
+    /// Addresses of the group's members, including this window; empty when not grouped.
+    pub grouped: Vec<String>,
+    pub tags: Vec<String>,
+    /// Place in the focus history; 0 is the focused window. `None` when the reply has none.
+    pub focus_history_id: Option<i64>,
+    pub inhibiting_idle: bool,
+    pub initial_class: String,
+    /// Hyprland's content type, such as `none`, `video` or `game`; empty when absent.
+    pub content_type: String,
 }
 
 /// The batched request that fetches everything a snapshot needs.
@@ -134,6 +181,11 @@ impl Hypr {
         Ok(reply)
     }
 
+    /// Asks Hyprland for the layer surfaces on each monitor.
+    pub fn layers(&self) -> Result<Layers, String> {
+        parse_layers(&self.request("j/layers")?)
+    }
+
     /// Asks Hyprland for its current state.
     pub fn snapshot(&self) -> Result<Snapshot, String> {
         parse(&self.request(REQUEST)?)
@@ -195,6 +247,61 @@ struct RawMonitor {
     actively_tearing: bool,
     #[serde(default, rename = "directScanoutTo")]
     direct_scanout_to: Option<String>,
+    #[serde(default)]
+    description: String,
+    #[serde(default, rename = "physicalWidth")]
+    physical_width: u32,
+    #[serde(default, rename = "physicalHeight")]
+    physical_height: u32,
+    #[serde(default, rename = "currentFormat")]
+    current_format: String,
+    #[serde(default, rename = "colorManagementPreset")]
+    color_preset: String,
+    #[serde(default, rename = "dpmsStatus")]
+    dpms: bool,
+    #[serde(default)]
+    reserved: [i64; 4],
+    #[serde(default)]
+    solitary: Option<String>,
+    #[serde(default, rename = "availableModes")]
+    modes: Vec<String>,
+    #[serde(default, rename = "solitaryBlockedBy")]
+    solitary_blocked_by: Option<Vec<String>>,
+    #[serde(default, rename = "tearingBlockedBy")]
+    tearing_blocked_by: Option<Vec<String>>,
+    #[serde(default, rename = "directScanoutBlockedBy")]
+    direct_scanout_blocked_by: Option<Vec<String>>,
+}
+
+#[derive(Deserialize)]
+struct RawLayerMonitor {
+    levels: std::collections::HashMap<String, Vec<RawLayer>>,
+}
+
+#[derive(Deserialize)]
+struct RawLayer {
+    namespace: String,
+    w: u32,
+    h: u32,
+}
+
+/// Parses the reply to `j/layers`.
+fn parse_layers(reply: &str) -> Result<Layers, String> {
+    let raw: std::collections::HashMap<String, RawLayerMonitor> = json("layers", reply)?;
+    Ok(raw
+        .into_iter()
+        .map(|(name, mut m)| {
+            let mut level = |key: &str| {
+                m.levels
+                    .remove(key)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|l| LayerSurface { namespace: l.namespace, w: l.w, h: l.h })
+                    .collect()
+            };
+            (name, [level("0"), level("1"), level("2"), level("3")])
+        })
+        .collect())
 }
 
 #[derive(Deserialize)]
@@ -222,6 +329,20 @@ struct RawWindow {
     size: (i64, i64),
     workspace: RawNamedId,
     monitor: i64,
+    #[serde(default, rename = "fullscreenClient")]
+    fullscreen_client: i64,
+    #[serde(default)]
+    grouped: Vec<String>,
+    #[serde(default)]
+    tags: Vec<String>,
+    #[serde(default, rename = "focusHistoryID")]
+    focus_history_id: Option<i64>,
+    #[serde(default, rename = "inhibitingIdle")]
+    inhibiting_idle: bool,
+    #[serde(default, rename = "initialClass")]
+    initial_class: String,
+    #[serde(default, rename = "contentType")]
+    content_type: String,
 }
 
 #[derive(Deserialize)]
@@ -270,6 +391,17 @@ pub(crate) fn parse(reply: &str) -> Result<Snapshot, String> {
                 vrr: m.vrr,
                 actively_tearing: m.actively_tearing,
                 direct_scanout: m.direct_scanout_to.is_some_and(|w| w != "0"),
+                description: m.description,
+                physical_size: (m.physical_width, m.physical_height),
+                format: m.current_format,
+                color_preset: m.color_preset,
+                dpms: m.dpms,
+                reserved: m.reserved,
+                solitary: m.solitary.is_some_and(|w| w != "0"),
+                modes: m.modes,
+                solitary_blocked_by: m.solitary_blocked_by.unwrap_or_default(),
+                tearing_blocked_by: m.tearing_blocked_by.unwrap_or_default(),
+                direct_scanout_blocked_by: m.direct_scanout_blocked_by.unwrap_or_default(),
             })
             .collect(),
         workspaces: workspaces
@@ -294,6 +426,14 @@ pub(crate) fn parse(reply: &str) -> Result<Snapshot, String> {
                 workspace_id: w.workspace.id,
                 workspace_name: w.workspace.name,
                 monitor_id: w.monitor,
+                fullscreen_state: w.fullscreen,
+                fullscreen_client: w.fullscreen_client,
+                grouped: w.grouped,
+                tags: w.tags,
+                focus_history_id: w.focus_history_id,
+                inhibiting_idle: w.inhibiting_idle,
+                initial_class: w.initial_class,
+                content_type: w.content_type,
             })
             .collect(),
         focused: active.address,
@@ -417,6 +557,62 @@ mod tests {
         }
     }
 
+    fn window(s: &Snapshot, address: &str) -> Window {
+        s.windows.iter().find(|w| w.address == address).unwrap().clone()
+    }
+
+    #[test]
+    fn the_fixture_windows_have_their_state_fields() {
+        let s = parse(FIXTURE).unwrap();
+        let emacs = window(&s, "0x5609f15cfcd0");
+        assert_eq!((emacs.fullscreen_state, emacs.fullscreen_client), (0, 0));
+        assert!(emacs.grouped.is_empty() && emacs.tags.is_empty());
+        assert_eq!(emacs.focus_history_id, Some(6));
+        assert!(!emacs.inhibiting_idle);
+        assert_eq!((emacs.initial_class.as_str(), emacs.content_type.as_str()), ("emacs", "none"));
+        let mut ranks: Vec<_> = s.windows.iter().filter_map(|w| w.focus_history_id).collect();
+        ranks.sort();
+        assert_eq!(ranks, (0..7).collect::<Vec<_>>());
+        assert_eq!(s.windows.iter().filter(|w| w.focus_history_id == Some(0)).count(), 1);
+    }
+
+    #[test]
+    fn a_grouped_tagged_pinned_fullscreen_window_gives_each_state() {
+        let s = parse(
+            &FIXTURE
+                .replacen("\"pinned\": false", "\"pinned\": true", 1)
+                .replacen("\"fullscreen\": 0", "\"fullscreen\": 3", 1)
+                .replacen("\"fullscreenClient\": 0", "\"fullscreenClient\": 2", 1)
+                .replacen("\"grouped\": []", "\"grouped\": [\"0x1a\", \"0x2b\"]", 1)
+                .replacen("\"tags\": []", "\"tags\": [\"term\", \"big\"]", 1)
+                .replacen("\"inhibitingIdle\": false", "\"inhibitingIdle\": true", 1)
+                .replacen("\"initialClass\": \"emacs\"", "\"initialClass\": \"first\"", 1)
+                .replacen("\"contentType\": \"none\"", "\"contentType\": \"video\"", 1),
+        )
+        .unwrap();
+        let w = window(&s, "0x5609f15cfcd0");
+        assert!(w.pinned && w.fullscreen && w.inhibiting_idle);
+        assert_eq!((w.fullscreen_state, w.fullscreen_client), (3, 2));
+        assert_eq!(w.grouped, ["0x1a", "0x2b"]);
+        assert_eq!(w.tags, ["term", "big"]);
+        assert_eq!((w.initial_class.as_str(), w.content_type.as_str()), ("first", "video"));
+    }
+
+    #[test]
+    fn a_window_missing_the_new_fields_still_parses_with_them_empty() {
+        let mut text = FIXTURE.to_string();
+        for key in ["fullscreenClient", "grouped", "tags", "focusHistoryID", "inhibitingIdle", "initialClass", "contentType"] {
+            while let Some(at) = text.find(&format!("    \"{key}\":")) {
+                let end = at + text[at..].find('\n').unwrap() + 1;
+                text.replace_range(at..end, "");
+            }
+        }
+        let w = window(&parse(&text).unwrap(), "0x5609f15cfcd0");
+        assert_eq!((w.fullscreen_client, w.focus_history_id), (0, None));
+        assert!(w.grouped.is_empty() && w.tags.is_empty() && !w.inhibiting_idle);
+        assert!(w.initial_class.is_empty() && w.content_type.is_empty());
+    }
+
     #[test]
     fn no_focused_window_gives_none() {
         let cut = FIXTURE.rfind("\n\n\n").unwrap();
@@ -502,8 +698,8 @@ mod tests {
 
     #[test]
     fn pid_is_the_first_line_of_the_lock_file_beside_the_socket() {
-        let (_dir, hypr) = socket_with_lock("pid", Some("1656\n/run/user/1000/hypr/sig/x\n"));
-        assert_eq!(hypr.pid(), Ok(1656));
+        let (_dir, hypr) = socket_with_lock("pid", Some("4242\n/run/user/1000/hypr/sig/x\n"));
+        assert_eq!(hypr.pid(), Ok(4242));
     }
 
     #[test]
@@ -517,5 +713,96 @@ mod tests {
     fn log_path_is_the_log_beside_the_socket() {
         let (dir, hypr) = socket_with_lock("logpath", None);
         assert_eq!(hypr.log_path(), dir.join("hyprland.log"));
+    }
+
+    #[test]
+    fn a_monitor_reply_with_every_new_field_parses_into_them() {
+        let m = &edited("\"reserved\": [0, 34, 0, 0]", "\"reserved\": [1, 34, 2, 3]").monitors[0];
+        assert_eq!(m.description, "Example Monitor 27 SERIAL0001");
+        assert_eq!(m.physical_size, (600, 340));
+        assert_eq!((m.format.as_str(), m.color_preset.as_str(), m.dpms), ("XRGB8888", "srgb", true));
+        assert_eq!(m.reserved, [1, 34, 2, 3]);
+        assert!(!m.solitary);
+        assert_eq!(m.solitary_blocked_by, ["WINDOWED", "CANDIDATE"]);
+        assert_eq!(m.tearing_blocked_by, ["NOT_TORN", "USER", "CANDIDATE", "HW_CURSOR"]);
+        assert_eq!(m.direct_scanout_blocked_by, ["USER", "CANDIDATE"]);
+        assert_eq!(m.modes.len(), 32);
+        assert_eq!((m.modes[0].as_str(), m.modes[2].as_str()), ("3840x2160@60.00Hz", "3840x2160@59.94Hz"));
+        assert!(!edited("\"dpmsStatus\": true", "\"dpmsStatus\": false").monitors[0].dpms);
+    }
+
+    #[test]
+    fn solitary_is_an_address_or_zero() {
+        assert!(!edited("\"solitary\": \"0\"", "\"solitary\": \"0\"").monitors[0].solitary);
+        assert!(edited("\"solitary\": \"0\"", "\"solitary\": \"0x5609\"").monitors[0].solitary);
+    }
+
+    #[test]
+    fn a_null_reason_list_is_empty() {
+        let m = &edited("[\"WINDOWED\",\"CANDIDATE\"]", "null").monitors[0];
+        assert!(m.solitary_blocked_by.is_empty());
+        let m = &edited("[\"USER\",\"CANDIDATE\"],\n    \"disabled", "null,\n    \"disabled").monitors[0];
+        assert!(m.direct_scanout_blocked_by.is_empty());
+        let m = &edited("[\"NOT_TORN\",\"USER\",\"CANDIDATE\",\"HW_CURSOR\"]", "null").monitors[0];
+        assert!(m.tearing_blocked_by.is_empty());
+    }
+
+    #[test]
+    fn a_monitor_missing_the_detail_fields_still_parses_with_them_empty() {
+        let mut text = FIXTURE.to_string();
+        let keys = [
+            "description", "physicalWidth", "physicalHeight", "currentFormat", "colorManagementPreset", "dpmsStatus",
+            "reserved", "solitary", "availableModes", "solitaryBlockedBy", "tearingBlockedBy", "directScanoutBlockedBy",
+        ];
+        for key in keys {
+            let at = text.find(&format!("    \"{key}\":")).unwrap();
+            let end = at + text[at..].find('\n').unwrap() + 1;
+            text.replace_range(at..end, "");
+        }
+        let m = &parse(&text).unwrap().monitors[0];
+        assert!(m.description.is_empty() && m.format.is_empty() && m.color_preset.is_empty() && m.modes.is_empty());
+        assert_eq!((m.physical_size, m.reserved, m.dpms, m.solitary), ((0, 0), [0; 4], false, false));
+        assert!(m.solitary_blocked_by.is_empty() && m.tearing_blocked_by.is_empty() && m.direct_scanout_blocked_by.is_empty());
+    }
+
+    const LAYERS: &str = r#"{
+"eDP-1": {
+    "levels": {
+
+        "0": [
+                { "address": "0x1", "x": 0, "y": 0, "w": 1600, "h": 1000, "alpha": 1, "namespace": "wallpaper", "pid": 7 }
+        ],
+        "1": [
+],
+        "2": [
+                { "address": "0x2", "x": 0, "y": 0, "w": 1600, "h": 48, "alpha": 1, "namespace": "bar", "pid": 7 },                { "address": "0x3", "x": 0, "y": 354, "w": 127, "h": 326, "alpha": 1, "namespace": "dock", "pid": 7 }
+        ],
+        "3": [
+]
+    }
+}
+}"#;
+
+    fn surface(namespace: &str, w: u32, h: u32) -> LayerSurface {
+        LayerSurface { namespace: namespace.into(), w, h }
+    }
+
+    #[test]
+    fn layers_sends_the_layers_request_alone_and_parses_four_levels_per_monitor() {
+        let (_dir, path, request) = serve_once("layers", LAYERS);
+        let layers = Hypr::at(&path).layers().unwrap();
+        assert_eq!(request.join().unwrap(), "j/layers");
+        let levels = &layers["eDP-1"];
+        assert_eq!(levels[0], [surface("wallpaper", 1600, 1000)]);
+        assert!(levels[1].is_empty() && levels[3].is_empty());
+        assert_eq!(levels[2], [surface("bar", 1600, 48), surface("dock", 127, 326)]);
+        assert!(!layers.contains_key("DP-9"));
+    }
+
+    #[test]
+    fn a_layers_reply_that_is_not_json_is_an_error() {
+        let (_dir, path, _request) = serve_once("layersbad", "not json");
+        assert!(Hypr::at(&path).layers().unwrap_err().contains("layers"));
+        assert!(parse_layers("").is_err());
     }
 }

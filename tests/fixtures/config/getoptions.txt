@@ -1,0 +1,43 @@
+{"option": "general:border_size", "int": 2, "set": true }
+
+
+{"option": "general:gaps_in", "css": "5 5 5 5", "set": true }
+
+
+{"option": "general:gaps_workspaces", "int": 0, "set": false }
+
+
+{"option": "general:col.active_border", "gradient": "ffffb596 0deg", "set": true }
+
+
+{"option": "general:layout", "str": "dwindle", "set": true }
+
+
+{"option": "general:resize_on_border", "bool": false, "set": true }
+
+
+{"option": "decoration:rounding_power", "float": 2.000000, "set": true }
+
+
+{"option": "decoration:shadow:offset", "vec2": [0,0], "set": false }
+
+
+{"option": "decoration:blur:vibrancy", "float": 0.169600, "set": true }
+
+
+{"option": "input:kb_model", "str": "", "set": true }
+
+
+invalid type (internal error)
+
+
+{"option": "group:groupbar:text_color", "int": 4282657311, "set": true }
+
+
+{"option": "group:groupbar:text_color_inactive", "int": 4294041560, "set": true }
+
+
+{"option": "misc:background_color", "int": 4279308561, "set": false }
+
+
+{"option": "misc:col.splash", "int": 1442840575, "set": false }

@@ -38,7 +38,7 @@
     "id": 1,
     "name": "DP-1",
     "description": "Example Monitor 27 SERIAL0001",
-    "make": "LG Electronics",
+    "make": "Example",
     "model": "Monitor 27",
     "serial": "SERIAL0001",
     "width": 3840,
@@ -89,7 +89,7 @@
     "windows": 1,
     "hasfullscreen": false,
     "lastwindow": "0x5609f1386480",
-    "lastwindowtitle": "◑ session two",
+    "lastwindowtitle": "session two",
     "ispersistent": false,
     "tiledLayout": "dwindle"
 },{
@@ -100,7 +100,7 @@
     "windows": 3,
     "hasfullscreen": false,
     "lastwindow": "0x5609f15e1f40",
-    "lastwindowtitle": "✳ session one",
+    "lastwindowtitle": "session one",
     "ispersistent": false,
     "tiledLayout": "dwindle"
 },{
@@ -323,7 +323,7 @@
     "floating": false,
     "monitor": 1,
     "class": "org.wezfurlong.wezterm",
-    "title": "✳ session one",
+    "title": "session one",
     "initialClass": "org.wezfurlong.wezterm",
     "initialTitle": "wezterm",
     "pid": 3466,
@@ -359,7 +359,7 @@
     "floating": false,
     "monitor": 1,
     "class": "org.wezfurlong.wezterm",
-    "title": "◑ session two",
+    "title": "session two",
     "initialClass": "org.wezfurlong.wezterm",
     "initialTitle": "wezterm",
     "pid": 3466,
@@ -398,7 +398,7 @@
     "floating": false,
     "monitor": 1,
     "class": "org.wezfurlong.wezterm",
-    "title": "✳ session one",
+    "title": "session one",
     "initialClass": "org.wezfurlong.wezterm",
     "initialTitle": "wezterm",
     "pid": 3466,
