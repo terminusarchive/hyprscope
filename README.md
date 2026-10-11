@@ -30,8 +30,6 @@ Six panels. The number is the key that opens one full-screen.
 cargo install hyprscope
 ```
 
-Or clone it and run `./build.sh`.
-
 ## Use
 
 | Option            | Action                   |

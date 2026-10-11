@@ -7,8 +7,8 @@ own work arrives there with a release.
 
 ## Building and running
 
-    ./build.sh          # release build
-    ./build.sh run      # build, then start hyprscope
+    cargo build --release   # release build
+    cargo run --release     # build, then start hyprscope
 
 hyprscope needs a running Hyprland session to show anything, but the tests do not:
 they use fake sockets and the files under `tests/fixtures/`.

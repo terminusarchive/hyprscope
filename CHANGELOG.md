@@ -4,6 +4,10 @@ All notable changes to hyprscope are listed here, newest first.
 
 ## Unreleased
 
+## 0.3.1 - 2026-10-11
+
+- `build.sh` is gone: build from a clone with `cargo build --release`, or start it with `cargo run --release`.
+
 ## 0.3.0 - 2026-10-11
 
 - hyprscope is on crates.io: `cargo install hyprscope`.
