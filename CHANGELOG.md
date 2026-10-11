@@ -4,6 +4,8 @@ All notable changes to hyprscope are listed here, newest first.
 
 ## Unreleased
 
+- The README shows how to install from a clone of the repository.
+
 ## 0.3.1 - 2026-10-11
 
 - `build.sh` is gone: build from a clone with `cargo build --release`, or start it with `cargo run --release`.

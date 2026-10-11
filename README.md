@@ -30,6 +30,14 @@ Six panels. The number is the key that opens one full-screen.
 cargo install hyprscope
 ```
 
+Or from a clone:
+
+```sh
+git clone https://github.com/terminusarchive/hyprscope
+cd hyprscope
+cargo install --locked --path .
+```
+
 ## Use
 
 | Option            | Action                   |
