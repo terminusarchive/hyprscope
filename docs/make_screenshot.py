@@ -3,8 +3,9 @@
 
     python3 docs/make_screenshot.py
 
-It needs Python 3 (standard library only), tmux, and the release binary (built with
-`cargo build --release` when it is missing). It takes about 80 seconds.
+It needs Python 3 (standard library only), tmux, `unshare` (util-linux) with unprivileged
+user namespaces enabled, and the release binary (built with `cargo build --release` when
+it is missing). It takes about 80 seconds.
 
 What it does:
 
@@ -20,8 +21,12 @@ What it does:
 
 The "Hyprland" process in the Hyprland panel is a child of this script that runs a
 little code to give the panel a CPU and memory figure and a thread count; its command
-line says `--config ~/.config/hypr/hyprland.lua`. It has no graphics device open, so
-the GPU row shows `n/a`, as it does on drivers that do not expose the counters. Its
+line says `--config ~/.config/hypr/hyprland.lua`. It has no graphics device open. The GPU row is
+invented: hyprscope runs in a private mount namespace (`unshare -r -m`) in which a
+directory of the script's own is bind-mounted over `/proc/<its pid>/fdinfo`. It holds one
+DRM client file in the kernel's time form, with an invented driver, device and client id,
+rewritten once a second with a rising engine counter (about 3 to 30 percent busy) and a
+memory figure of a few hundred MiB. No GPU figure of the machine is read. Its
 process ID, shown in the same panel, is replaced in the picture by an invented one.
 """
 
@@ -29,7 +34,9 @@ import argparse
 import html
 import json
 import os
+import random
 import re
+import shlex
 import shutil
 import socket
 import subprocess
@@ -310,6 +317,16 @@ class Standin:
         )
         with open(os.path.join(self.dir, "hyprland.lock"), "w") as f:
             f.write(f"{self.child.pid}\n{SIGNATURE}\n")
+        # The invented DRM client file. The temporary copy is kept outside the directory that
+        # is mounted over fdinfo, so a rescan never sees it as a second client.
+        self.fdinfo = os.path.join(base, "fdinfo")
+        self.fdtmp = os.path.join(base, "fdtmp")
+        os.makedirs(self.fdinfo)
+        os.makedirs(self.fdtmp)
+        self.gpu_busy = 0
+        self.gpu_level = 0.1
+        self.gpu_random = random.Random(11)
+        self.write_fdinfo(250)
         self.log_path = os.path.join(self.dir, "hyprland.log")
         with open(self.log_path, "w") as f:
             f.write("\n".join(LOG_LINES) + "\n")
@@ -364,6 +381,31 @@ class Standin:
             except OSError:
                 pass
 
+    def write_fdinfo(self, mib):
+        text = (
+            "pos:\t0\nflags:\t02100002\nmnt_id:\t27\nino:\t1\n"
+            "drm-driver:\texampledrm\ndrm-pdev:\t0000:0a:00.0\ndrm-client-id:\t5\n"
+            f"drm-engine-gfx:\t{self.gpu_busy} ns\ndrm-resident-vram:\t{mib} MiB\n"
+        )
+        tmp = os.path.join(self.fdtmp, "client")
+        with open(tmp, "w") as f:
+            f.write(text)
+        os.replace(tmp, os.path.join(self.fdinfo, "7"))
+
+    def gpu_writer(self):
+        rnd = self.gpu_random
+        mib = 250
+        while not self.stop.wait(1):
+            self.gpu_level = min(0.3, max(0.03, self.gpu_level + rnd.uniform(-0.06, 0.06)))
+            self.gpu_busy += int(self.gpu_level * 1e9)
+            mib = min(420, max(200, mib + rnd.randint(-12, 15)))
+            self.write_fdinfo(mib)
+
+    def start_gpu_writer(self):
+        thread = threading.Thread(target=self.gpu_writer, daemon=True)
+        thread.start()
+        self.threads.append(thread)
+
     def append_log(self):
         start = time.monotonic()
         for when, line in LOG_LATER:
@@ -396,10 +438,13 @@ def tmux(socket_path, *args, check=True):
     )
 
 
-def capture(binary, base, seconds):
+def capture(binary, base, seconds, pid, fdinfo):
     sock = os.path.join(base, "tmux.sock")
     env = f"XDG_RUNTIME_DIR={base} HYPRLAND_INSTANCE_SIGNATURE={SIGNATURE} TZ=UTC TERM=tmux-256color"
-    command = f"env {env} {binary}"
+    # Mounted over the stand-in's fdinfo in a private namespace, so hyprscope reads the
+    # invented client file there; everything else in /proc stays as it is.
+    inner = f"mount --bind {shlex.quote(fdinfo)} /proc/{pid}/fdinfo && exec env {env} {shlex.quote(binary)}"
+    command = f"unshare -r -m sh -c {shlex.quote(inner)}"
     try:
         tmux(sock, "new-session", "-d", "-s", "shot", "-x", str(COLS), "-y", str(ROWS), command)
         tmux(sock, "set-option", "-g", "status", "off")
@@ -654,7 +699,8 @@ def main():
     try:
         standin = Standin(base, args.seconds)
         standin.start_log_writer()
-        screen = capture(args.binary, base, args.seconds)
+        standin.start_gpu_writer()
+        screen = capture(args.binary, base, args.seconds, standin.child.pid, standin.fdinfo)
     finally:
         if standin:
             standin.close()

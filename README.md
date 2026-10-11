@@ -8,14 +8,14 @@ on one screen, live. It only reads from Hyprland and never changes anything.
 
 Six panels. The number is the key that opens one full-screen.
 
-| Key | Panel |
-| --- | --- |
-| `1` | Hyprland: PID, uptime, CPU, memory and GPU history |
-| `2` | Config: errors, options set, binds, animations |
+| Key | Panel                                               |
+|-----|-----------------------------------------------------|
+| `1` | Hyprland: PID, uptime, CPU, memory and GPU history  |
+| `2` | Config: errors, options set, binds, animations      |
 | `3` | Windows: monitors, workspaces and windows as a tree |
-| `4` | Monitors: layout, mode, scale, VRR |
-| `5` | Events: Hyprland's event stream, repeats counted |
-| `6` | Log: Hyprland's recent warnings and errors |
+| `4` | Monitors: layout, mode, scale, VRR                  |
+| `5` | Events: Hyprland's event stream, repeats counted    |
+| `6` | Log: Hyprland's recent warnings and errors          |
 
 ## Requirements
 
@@ -34,22 +34,22 @@ Or clone it and run `./build.sh`.
 
 ## Use
 
-| Option | Action |
-| --- | --- |
-| `-V`, `--version` | Print the version. |
-| `-h`, `--help` | Print help. |
-| `--theme NAME` | Start with theme `NAME`. |
+| Option            | Action                   |
+|-------------------|--------------------------|
+| `-V`, `--version` | Print the version.       |
+| `-h`, `--help`    | Print help.              |
+| `--theme NAME`    | Start with theme `NAME`. |
 
-| Key | Action |
-| --- | --- |
-| `Up` `Down` `k` `j`, `PageUp` `PageDown` | Select or scroll. |
-| `1`-`6`, `Enter` | Open a view; `Enter` opens Windows with its inspector. |
-| `Esc` | Back to the front page. |
-| `/` | Filter Windows, Events, Log or Config. |
-| `Tab`, `a` | Config: next tab; options set or all. |
-| `Space`, `r`, `l` | Events and Log: pause; Events raw form; Log level. |
-| `t`, `T` | Next or previous theme. The choice is not saved. |
-| `q`, `Ctrl-C` | Quit. |
+| Key                                      | Action                                                 |
+|------------------------------------------|--------------------------------------------------------|
+| `Up` `Down` `k` `j`, `PageUp` `PageDown` | Select or scroll.                                      |
+| `1`-`6`, `Enter`                         | Open a view; `Enter` opens Windows with its inspector. |
+| `Esc`                                    | Back to the front page.                                |
+| `/`                                      | Filter Windows, Events, Log or Config.                 |
+| `Tab`, `a`                               | Config: next tab; options set or all.                  |
+| `Space`, `r`, `l`                        | Events and Log: pause; Events raw form; Log level.     |
+| `t`, `T`                                 | Next or previous theme. The choice is not saved.       |
+| `q`, `Ctrl-C`                            | Quit.                                                  |
 
 ## Themes
 
