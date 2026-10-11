@@ -21,8 +21,8 @@ jobs:
           toolchain: ${{ matrix.toolchain }}
           components: ${{ matrix.toolchain == 'stable' && 'clippy' || '' }}
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build --locked
-      - run: cargo test --locked
+      - run: cargo build
+      - run: cargo test
       # Lint sets differ between compiler versions, so lint on stable only.
       - if: matrix.toolchain == 'stable'
-        run: cargo clippy --all-targets --locked -- -D warnings
+        run: cargo clippy --all-targets -- -D warnings

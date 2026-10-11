@@ -20,9 +20,9 @@ push to `main`: the build and the tests run on the stable Rust
 toolchain and on 1.88, the oldest the crate supports, and clippy runs on stable only.
 Run them before you open a pull request:
 
-    cargo build --locked
-    cargo test --locked
-    cargo clippy --all-targets --locked -- -D warnings
+    cargo build
+    cargo test
+    cargo clippy --all-targets -- -D warnings
 
 ## Pull requests
 

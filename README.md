@@ -35,7 +35,7 @@ Or from a clone:
 ```sh
 git clone https://github.com/terminusarchive/hyprscope
 cd hyprscope
-cargo install --locked --path .
+cargo install --path .
 ```
 
 ## Use
