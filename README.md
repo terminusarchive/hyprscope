@@ -27,7 +27,7 @@ Six panels. The number is the key that opens one full-screen.
 ## Install
 
 ```sh
-cargo install --git https://github.com/terminusarchive/hyprscope
+cargo install hyprscope
 ```
 
 Or clone it and run `./build.sh`.

@@ -4,6 +4,9 @@ All notable changes to hyprscope are listed here, newest first.
 
 ## Unreleased
 
+## 0.3.0 - 2026-10-11
+
+- hyprscope is on crates.io: `cargo install hyprscope`.
 - Twenty-six colour themes: `--theme NAME` starts with one showing, and `t` and `T` step through them while it runs. The name shows in the top border, and the `terminal` theme uses your terminal's own colours.
 - The repository is public, and pull requests are merged directly.
 
