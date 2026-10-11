@@ -7,7 +7,10 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::config::Summary;
-use crate::ui::{BAD, GOOD, MONITOR, MUTED, PANEL_BORDER, clean, fit, title_name, width};
+use crate::ui::{clean, fit, title_name, width};
+use crate::theme;
+#[cfg(test)]
+use crate::ui::{BAD, GOOD, MUTED, PANEL_BORDER};
 
 const SIDE: usize = 1;
 
@@ -15,7 +18,7 @@ const SIDE: usize = 1;
 pub(crate) type Part = (String, Style);
 
 pub(crate) fn muted(s: &str) -> Part {
-    (s.into(), Style::new().fg(MUTED))
+    (s.into(), Style::new().fg(theme::current().muted))
 }
 
 /// A figure: bold, in the default colour.
@@ -29,7 +32,7 @@ pub(crate) fn plain(s: &str) -> Part {
 
 /// `n/a` after the words, for a figure that could not be fetched.
 pub(crate) fn missing(words: &str) -> Vec<Part> {
-    vec![muted(words), (" n/a".into(), Style::new().fg(MUTED).add_modifier(Modifier::BOLD))]
+    vec![muted(words), (" n/a".into(), Style::new().fg(theme::current().muted).add_modifier(Modifier::BOLD))]
 }
 
 /// `1 bind`, `2 binds`.
@@ -43,11 +46,11 @@ fn counted(n: usize, one: &str, many: &str) -> Vec<Part> {
 pub(crate) fn verdict(errors: Option<&[String]>) -> Vec<Part> {
     match errors {
         None => missing("config errors"),
-        Some([]) => vec![("✓ no config errors".into(), Style::new().fg(GOOD))],
+        Some([]) => vec![("✓ no config errors".into(), Style::new().fg(theme::current().good))],
         Some(errors) => {
             let n = errors.len();
             let noun = if n == 1 { "config error" } else { "config errors" };
-            vec![(format!("✗ {n} {noun}"), Style::new().fg(BAD))]
+            vec![(format!("✗ {n} {noun}"), Style::new().fg(theme::current().bad))]
         }
     }
 }
@@ -116,7 +119,7 @@ fn title(file: Option<&str>, slot_width: usize, number: Option<u8>) -> Line<'sta
     } else {
         return Line::from([name, vec![Span::raw(" ")]].concat());
     };
-    Line::from([name, vec![Span::styled(" ─ ", Style::new().fg(MUTED)), Span::styled(shown, Style::new().fg(MONITOR)), Span::raw(" ")]].concat())
+    Line::from([name, vec![Span::styled(" ─ ", Style::new().fg(theme::current().muted)), Span::styled(shown, Style::new().fg(theme::current().monitor)), Span::raw(" ")]].concat())
 }
 
 /// The parts cut to display width `w`, the last one shortened with `…` if it overflows.
@@ -139,7 +142,7 @@ pub(crate) fn clip(parts: Vec<Part>, w: usize) -> Line<'static> {
 pub fn draw(frame: &mut Frame, area: Rect, summary: &Summary, file: Option<&str>, reloaded: Option<&str>, number: Option<u8>) {
     let block = Block::new()
         .borders(Borders::ALL)
-        .border_style(Style::new().fg(PANEL_BORDER))
+        .border_style(Style::new().fg(theme::current().panel_border))
         .title_top(title(file, area.width as usize, number));
     let body = block.inner(area);
     frame.render_widget(block, area);

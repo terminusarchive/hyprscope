@@ -7,7 +7,10 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::events::{self, Family, Feed};
-use crate::ui::{ACCENT, BAD, BLUE, CYAN, FLAG, GOOD, MONITOR, MUTED, PANEL_BORDER, clean, fit, pad, title_name, width};
+use crate::ui::{clean, fit, pad, title_name, width};
+use crate::theme;
+#[cfg(test)]
+use crate::ui::{ACCENT, BAD, BLUE, CYAN, FLAG, GOOD, MONITOR, MUTED, PANEL_BORDER};
 use crate::usage::spark;
 
 /// Bars never scale below this many events a second, so one or two stay low.
@@ -27,14 +30,14 @@ pub(crate) const SIDE: usize = 1;
 pub fn draw(frame: &mut Frame, area: Rect, feed: &Feed, now: u64, number: Option<u8>) {
     let block = Block::new()
         .borders(Borders::ALL)
-        .border_style(Style::new().fg(PANEL_BORDER))
+        .border_style(Style::new().fg(theme::current().panel_border))
         .title_top(title(feed, now, number));
     let body = block.inner(area);
     frame.render_widget(block, area);
 
     let kind_width = feed.lines().iter().map(|l| width(&clean(&l.kind))).max().unwrap_or(0);
     let payload_width = (body.width as usize).saturating_sub(SIDE + TIME + GAP.len() + kind_width + GAP.len() + COUNT_GAP + COUNT + SIDE);
-    let muted = Style::new().fg(MUTED);
+    let muted = Style::new().fg(theme::current().muted);
     let lines: Vec<Line> = feed
         .lines()
         .iter()
@@ -66,8 +69,8 @@ fn title(feed: &Feed, now: u64, number: Option<u8>) -> Line<'static> {
     let mut spans = title_name("Events", number);
     spans.extend([
         Span::raw(" "),
-        Span::styled(bars, Style::new().fg(CYAN)),
-        Span::styled(format!(" {}/s ", feed.rate(now)), Style::new().fg(MUTED)),
+        Span::styled(bars, Style::new().fg(theme::current().cyan)),
+        Span::styled(format!(" {}/s ", feed.rate(now)), Style::new().fg(theme::current().muted)),
     ]);
     Line::from(spans)
 }
@@ -75,13 +78,13 @@ fn title(feed: &Feed, now: u64, number: Option<u8>) -> Line<'static> {
 /// The colour of a kind of event, by its family.
 pub(crate) fn colour(family: Family, kind: &str) -> Color {
     match (family, kind) {
-        (_, "closewindow" | "kill") => BAD,
-        (Family::Focus, _) => CYAN,
-        (Family::Open, _) => GOOD,
-        (Family::State, _) => FLAG,
-        (Family::Workspaces, _) => BLUE,
-        (Family::Layers, _) => MONITOR,
-        (Family::Config, _) => ACCENT,
+        (_, "closewindow" | "kill") => theme::current().bad,
+        (Family::Focus, _) => theme::current().cyan,
+        (Family::Open, _) => theme::current().good,
+        (Family::State, _) => theme::current().flag,
+        (Family::Workspaces, _) => theme::current().blue,
+        (Family::Layers, _) => theme::current().monitor,
+        (Family::Config, _) => theme::current().accent,
         (Family::Unknown, _) => Color::Reset,
     }
 }

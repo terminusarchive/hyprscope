@@ -9,7 +9,10 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::hypr::Snapshot;
-use crate::ui::{BLUE, CYAN, FLAG, MONITOR, MUTED, PANEL_BORDER, title_name, width};
+use crate::ui::{title_name, width};
+use crate::theme;
+#[cfg(test)]
+use crate::ui::{CYAN, MONITOR, MUTED, PANEL_BORDER};
 use crate::usage::{History, Sample, spark, spark_from_low};
 
 
@@ -49,7 +52,7 @@ pub fn draw(frame: &mut Frame, area: Rect, history: &History, pid: Option<u32>, 
     let newest = history.iter().last();
     let block = Block::new()
         .borders(Borders::ALL)
-        .border_style(Style::new().fg(PANEL_BORDER))
+        .border_style(Style::new().fg(theme::current().panel_border))
         .title_top(title(snap, area.width as usize, number));
     let body = block.inner(area);
     frame.render_widget(block, area);
@@ -64,13 +67,13 @@ pub fn draw(frame: &mut Frame, area: Rect, history: &History, pid: Option<u32>, 
 /// The title: the name, then the version, the config provider and `submap: <name>` while
 /// each fits inside the top border with at least one border character after it.
 fn title(snap: &Snapshot, slot_width: usize, number: Option<u8>) -> Line<'static> {
-    let value = |t: &str| Span::styled(t.to_string(), Style::new().fg(MONITOR));
+    let value = |t: &str| Span::styled(t.to_string(), Style::new().fg(theme::current().monitor));
     let parts = [
         (!snap.version.is_empty()).then(|| vec![value(&snap.version)]),
         (!snap.config_provider.is_empty()).then(|| vec![value(&snap.config_provider)]),
-        (!snap.submap.is_empty()).then(|| vec![Span::styled("submap: ", Style::new().fg(MUTED)), value(&snap.submap)]),
+        (!snap.submap.is_empty()).then(|| vec![Span::styled("submap: ", Style::new().fg(theme::current().muted)), value(&snap.submap)]),
     ];
-    let sep = || Span::styled(" ─ ", Style::new().fg(MUTED));
+    let sep = || Span::styled(" ─ ", Style::new().fg(theme::current().muted));
     // Between the corners, less one border character that must remain.
     let room = slot_width.saturating_sub(3);
     let mut spans = title_name("Hyprland", number);
@@ -90,7 +93,7 @@ fn title(snap: &Snapshot, slot_width: usize, number: Option<u8>) -> Line<'static
 
 /// The first line: `pid 4242 · up 5h 12m`, each part left out when unknown.
 fn process(pid: Option<u32>, newest: Option<&Sample>) -> Line<'static> {
-    let muted = Style::new().fg(MUTED);
+    let muted = Style::new().fg(theme::current().muted);
     let parts = [
         pid.map(|p| ("pid ", p.to_string())),
         newest.and_then(|s| s.uptime).map(|u| ("up ", uptime(u))),
@@ -114,7 +117,7 @@ fn summary(newest: Option<&Sample>) -> Line<'static> {
     if parts.is_empty() {
         return Line::default();
     }
-    Line::from(Span::styled(format!(" {}", parts.join(" · ")), Style::new().fg(MUTED)))
+    Line::from(Span::styled(format!(" {}", parts.join(" · ")), Style::new().fg(theme::current().muted)))
 }
 
 fn metrics<'a>(history: &History, newest: Option<&Sample>) -> [Metric<'a>; 3] {
@@ -125,7 +128,7 @@ fn metrics<'a>(history: &History, newest: Option<&Sample>) -> [Metric<'a>; 3] {
     [
         Metric {
             label: "CPU",
-            colour: CYAN,
+            colour: theme::current().cyan,
             values: cpu,
             floor: 10.0,
             from_low: false,
@@ -134,7 +137,7 @@ fn metrics<'a>(history: &History, newest: Option<&Sample>) -> [Metric<'a>; 3] {
         },
         Metric {
             label: "MEM",
-            colour: BLUE,
+            colour: theme::current().blue,
             values: mem,
             floor: 16.0 * 1024.0 * 1024.0,
             from_low: true,
@@ -143,7 +146,7 @@ fn metrics<'a>(history: &History, newest: Option<&Sample>) -> [Metric<'a>; 3] {
         },
         Metric {
             label: "GPU",
-            colour: FLAG,
+            colour: theme::current().flag,
             values: gpu,
             floor: 10.0,
             from_low: false,
@@ -155,9 +158,9 @@ fn metrics<'a>(history: &History, newest: Option<&Sample>) -> [Metric<'a>; 3] {
 }
 
 fn line(m: &Metric, width: usize) -> Line<'static> {
-    let mut spans = vec![Span::raw(" "), Span::styled(m.label.to_string(), Style::new().fg(MUTED)), Span::raw(" ")];
+    let mut spans = vec![Span::raw(" "), Span::styled(m.label.to_string(), Style::new().fg(theme::current().muted)), Span::raw(" ")];
     let Some(current) = &m.current else {
-        spans.push(Span::styled("n/a", Style::new().fg(MUTED)));
+        spans.push(Span::styled("n/a", Style::new().fg(theme::current().muted)));
         return Line::from(spans);
     };
     let room = width.saturating_sub(BASE);
@@ -173,7 +176,7 @@ fn line(m: &Metric, width: usize) -> Line<'static> {
         if m.values.is_empty() {
             spans.push(Span::raw(" ".repeat(PEAK_WORD.len() + PEAK)));
         } else {
-            spans.push(Span::styled(PEAK_WORD, Style::new().fg(MUTED)));
+            spans.push(Span::styled(PEAK_WORD, Style::new().fg(theme::current().muted)));
             spans.push(Span::raw(format!("{:<PEAK$}", (m.format)(peak))));
         }
     }

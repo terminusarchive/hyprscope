@@ -25,6 +25,7 @@ use crate::log_panel;
 use crate::log_zoom;
 use crate::monitors_panel;
 use crate::monitors_zoom;
+use crate::theme;
 use crate::windows_panel;
 use crate::tree::Row;
 use crate::usage::{History, ProcessInfo, Sample};
@@ -127,8 +128,8 @@ pub fn zoom_number(panel: u8) -> Option<u8> {
 /// what the eye finds), and its name in the title colour.
 pub(crate) fn title_name(name: &str, number: Option<u8>) -> Vec<Span<'static>> {
     let mut spans = vec![Span::raw(" ")];
-    spans.extend(number.map(|n| Span::styled(format!("{n} "), Style::new().fg(MUTED))));
-    spans.push(Span::styled(name.to_string(), Style::new().fg(CYAN).add_modifier(Modifier::BOLD)));
+    spans.extend(number.map(|n| Span::styled(format!("{n} "), Style::new().fg(theme::current().muted))));
+    spans.push(Span::styled(name.to_string(), Style::new().fg(theme::current().cyan).add_modifier(Modifier::BOLD)));
     spans
 }
 
@@ -217,14 +218,28 @@ pub struct View<'a> {
 }
 
 pub fn draw(frame: &mut Frame, view: &View) {
+    draw_screen(frame, view);
+    let palette = theme::current();
+    for cell in frame.buffer_mut().content.iter_mut() {
+        if cell.fg == Color::Reset {
+            cell.fg = palette.text;
+        }
+        if cell.bg == Color::Reset {
+            cell.bg = palette.background;
+        }
+    }
+}
+
+fn draw_screen(frame: &mut Frame, view: &View) {
     let area = frame.area();
     if area.width < MIN_WIDTH || area.height < MIN_HEIGHT {
         too_small(frame, area);
         return;
     }
     let outer = frame_block()
-        .border_style(Style::new().fg(CYAN))
+        .border_style(Style::new().fg(theme::current().cyan))
         .title_top(header(view.screen))
+        .title_top(theme_entry().right_aligned())
         .title_bottom(footer(view.screen, view.browse, view.config_state));
     frame.render_widget(outer, area);
     match view.screen {
@@ -286,20 +301,20 @@ pub fn draw(frame: &mut Frame, view: &View) {
 /// The centred "terminal too small" message, in place of the screen.
 fn too_small(frame: &mut Frame, area: Rect) {
     let size = |label: &str, w: u16, h: u16| {
-        let colour = |n: u16, min: u16| Style::new().fg(if n < min { BAD } else { GOOD });
+        let colour = |n: u16, min: u16| Style::new().fg(if n < min { theme::current().bad } else { theme::current().good });
         Line::from(vec![
-            Span::styled(format!("{label} = "), Style::new().fg(MUTED)),
+            Span::styled(format!("{label} = "), Style::new().fg(theme::current().muted)),
             Span::styled(w.to_string(), colour(w, MIN_WIDTH)),
-            Span::styled("   Height = ", Style::new().fg(MUTED)),
+            Span::styled("   Height = ", Style::new().fg(theme::current().muted)),
             Span::styled(h.to_string(), colour(h, MIN_HEIGHT)),
         ])
     };
     let lines = vec![
-        Line::from(Span::styled("Terminal size too small", Style::new().fg(ACCENT).add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled("Terminal size too small", Style::new().fg(theme::current().accent).add_modifier(Modifier::BOLD))),
         Line::default(),
         size("Width", area.width, area.height),
         Line::default(),
-        Line::from(Span::styled("Needed for current view:", Style::new().fg(MUTED))),
+        Line::from(Span::styled("Needed for current view:", Style::new().fg(theme::current().muted))),
         size("Width", MIN_WIDTH, MIN_HEIGHT),
     ];
     let w = lines.iter().map(|l| l.width()).max().unwrap_or(0) as u16;
@@ -317,7 +332,7 @@ fn too_small(frame: &mut Frame, area: Rect) {
 /// The top border's title: `hyprscope`, and on a zoomed screen ` ─ ` and its panel's name. The
 /// separator is a border glyph, so `gradient` colours it with the border.
 fn header(screen: Screen) -> Line<'static> {
-    let bold = Style::new().fg(CYAN).add_modifier(Modifier::BOLD);
+    let bold = Style::new().fg(theme::current().cyan).add_modifier(Modifier::BOLD);
     let mut spans = vec![Span::raw(" "), Span::styled("hyprscope", bold)];
     let name = match screen {
         Screen::Front => None,
@@ -332,6 +347,13 @@ fn header(screen: Screen) -> Line<'static> {
         spans.extend([Span::raw(" ─ "), Span::styled(name, bold)]);
     }
     spans.push(Span::raw(" "));
+    Line::from(spans)
+}
+
+/// The top border's right end: `t` and the name of the theme showing, styled as a key hint.
+fn theme_entry() -> Line<'static> {
+    let mut spans = vec![Span::raw(" ")];
+    spans.extend(keys_spans(&[("t".to_string(), theme::name())]));
     Line::from(spans)
 }
 
@@ -394,8 +416,8 @@ fn footer(screen: Screen, browse: &Browse, config: &crate::config_zoom::State) -
         // What the keys leave of the minimum width, less the label, quotes and separator.
         let room = (MIN_WIDTH as usize).saturating_sub(2 + 1 + Line::from(rest.clone()).width() + label.len() + 7);
         spans.extend([
-            Span::styled(label, Style::new().fg(CYAN)),
-            Span::styled(format!(" \"{}\" · ", ellipsize(&clean(&text), room.max(1))), Style::new().fg(MUTED)),
+            Span::styled(label, Style::new().fg(theme::current().cyan)),
+            Span::styled(format!(" \"{}\" · ", ellipsize(&clean(&text), room.max(1))), Style::new().fg(theme::current().muted)),
         ]);
     }
     spans.extend(rest);
@@ -430,7 +452,7 @@ fn config_keys(browse: &Browse, config: &crate::config_zoom::State, views: (Stri
 
 /// `key action · key action ` for each pair.
 fn keys_spans(keys: &[(String, &str)]) -> Vec<Span<'static>> {
-    let (key_style, text) = (Style::new().fg(CYAN), Style::new().fg(MUTED));
+    let (key_style, text) = (Style::new().fg(theme::current().cyan), Style::new().fg(theme::current().muted));
     let mut spans = Vec::new();
     for (i, (key, action)) in keys.iter().enumerate() {
         let after = if i + 1 < keys.len() { " · " } else { " " };
@@ -442,7 +464,7 @@ fn keys_spans(keys: &[(String, &str)]) -> Vec<Span<'static>> {
 
 /// The footer while the filter prompt is open: the text typed so far, its tail if it is long.
 fn prompt_line(text: &str) -> Line<'static> {
-    let (key_style, muted) = (Style::new().fg(CYAN), Style::new().fg(MUTED));
+    let (key_style, muted) = (Style::new().fg(theme::current().cyan), Style::new().fg(theme::current().muted));
     let rest = keys_spans(&[("enter".into(), "keep"), ("esc".into(), "clear")]);
     let room = (MIN_WIDTH as usize).saturating_sub(2 + 3 + 1 + 3 + Line::from(rest.clone()).width());
     let text = clean(text);
@@ -536,7 +558,12 @@ fn gradient(frame: &mut Frame, area: Rect) {
     if area.width == 0 || area.height == 0 {
         return;
     }
-    let (from, to) = (rgb(CYAN), rgb(BLUE));
+    let palette = theme::current();
+    if !matches!((palette.cyan, palette.blue), (Color::Rgb(..), Color::Rgb(..))) {
+        flat(frame, area, palette.cyan);
+        return;
+    }
+    let (from, to) = (rgb(palette.cyan), rgb(palette.blue));
     let last = area.width.saturating_sub(1).max(1) as f32;
     let buf = frame.buffer_mut();
     for x in area.left()..area.right() {
@@ -564,6 +591,21 @@ fn rgb(c: Color) -> (u8, u8, u8) {
     match c {
         Color::Rgb(r, g, b) => (r, g, b),
         _ => (255, 255, 255),
+    }
+}
+
+/// The border in one colour, for a theme whose colours are not 24-bit.
+fn flat(frame: &mut Frame, area: Rect, color: Color) {
+    let buf = frame.buffer_mut();
+    for x in area.left()..area.right() {
+        for y in [area.top(), area.bottom() - 1] {
+            recolour(buf, x, y, color);
+        }
+        if x == area.left() || x == area.right() - 1 {
+            for y in area.top()..area.bottom() {
+                recolour(buf, x, y, color);
+            }
+        }
     }
 }
 
@@ -708,7 +750,8 @@ pub(crate) mod tests {
         let t = text(&render(&s, &r, 0, 120, 32));
         assert!(t[0].starts_with("┌ hyprscope ─"), "{}", t[0]);
         let rest: String = t[0].chars().skip("┌ hyprscope ".len()).collect();
-        assert!(rest.chars().all(|c| "─┐".contains(c)), "{}", t[0]);
+        let rest = rest.strip_suffix(" t hyprland ┐").unwrap_or_else(|| panic!("{}", t[0]));
+        assert!(rest.chars().all(|c| c == '─'), "{}", t[0]);
         assert!(t[31].starts_with("└ ↑↓ select · enter inspect · 1 2 3 4 5 6 zoom · q quit "), "{}", t[31]);
         assert!(t[1].contains("Hyprland") && t[8].contains("Windows"));
     }
@@ -1745,5 +1788,117 @@ pub(crate) mod tests {
                 println!("{l}");
             }
         }
+    }
+
+    #[test]
+    fn every_screen_draws_in_the_theme_showing() {
+        use crate::theme;
+        let today = [
+            CYAN, BLUE, ACCENT, PANEL_BORDER, MONITOR, FLAG, CYAN_DEEP, BLUE_DEEP, FLAG_DEEP, MUTED,
+            GUIDE, DIM, BAD, GOOD, SELECTED, crate::graph::NEWEST,
+        ];
+        assert!(theme::set("dracula"));
+        let (s, mut r) = fixture();
+        let i = r.iter().position(|r| matches!(r.kind, Kind::Window { .. })).unwrap();
+        r[i].focused = true;
+        let Kind::Window { class, .. } = &r[i].kind else { unreachable!() };
+        let class = class.clone();
+        let rgb = |h: u32| Color::Rgb((h >> 16) as u8, (h >> 8) as u8, h as u8);
+        for screen in [Screen::Front, Screen::Windows, Screen::Hyprland, Screen::Monitors, Screen::Events, Screen::Log, Screen::Config] {
+            let mut t = Terminal::new(TestBackend::new(116, 40)).unwrap();
+            let mut scene = Scene::new(&s, &r);
+            scene.screen = screen;
+            t.draw(|f| draw(f, &scene.view())).unwrap();
+            let b = t.backend().buffer().clone();
+            let fgs: Vec<Color> = b.content().iter().map(|c| c.fg).collect();
+            assert!(fgs.contains(&rgb(0x8be9fd)), "title {screen:?}");
+            assert!(fgs.contains(&rgb(0x6272a4)), "border {screen:?}");
+            for c in today {
+                assert!(!fgs.contains(&c), "{c:?} on {screen:?}");
+            }
+            if matches!(screen, Screen::Front | Screen::Windows) {
+                assert_eq!(fg_of(&b, &class), rgb(0xf1fa8c), "focused window on {screen:?}");
+            }
+        }
+    }
+
+    const SCREENS: [Screen; 7] = [Screen::Front, Screen::Windows, Screen::Hyprland, Screen::Monitors, Screen::Events, Screen::Log, Screen::Config];
+
+    /// Every screen at 116x40 with a row selected, and the too-small one.
+    fn all_screens() -> Vec<Buffer> {
+        let (s, r) = fixture();
+        let mut out: Vec<Buffer> = SCREENS
+            .iter()
+            .map(|&screen| {
+                let mut scene = Scene::new(&s, &r);
+                scene.screen = screen;
+                scene.selected = r.iter().position(|r| r.address.is_some());
+                render_scene(&scene, 116, 40)
+            })
+            .collect();
+        out.push(render_scene(&Scene::new(&s, &r), 40, 10));
+        out
+    }
+
+    #[test]
+    fn a_theme_with_a_background_paints_every_cell_but_the_selected_row() {
+        assert!(crate::theme::set("dracula"));
+        let (selected, background, text) = (crate::theme::current().selected, Color::Rgb(0x28, 0x2a, 0x36), Color::Rgb(0xf8, 0xf8, 0xf2));
+        for b in all_screens() {
+            assert!(b.content().iter().all(|c| c.bg == background || c.bg == selected));
+            assert!(b.content().iter().all(|c| c.fg != Color::Reset));
+            assert!(b.content().iter().any(|c| c.fg == text));
+        }
+        assert!(all_screens().iter().any(|b| b.content().iter().any(|c| c.bg == selected)));
+    }
+
+    #[test]
+    fn hyprland_and_terminal_paint_no_background_and_terminal_no_24_bit_colour() {
+        for name in ["hyprland", "terminal"] {
+            assert!(crate::theme::set(name));
+            let selected = crate::theme::current().selected;
+            for b in all_screens() {
+                assert!(b.content().iter().all(|c| c.bg == Color::Reset || c.bg == selected), "{name}");
+                if name == "terminal" {
+                    assert!(b.content().iter().all(|c| !matches!(c.fg, Color::Rgb(..)) && !matches!(c.bg, Color::Rgb(..))));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_top_border_of_every_screen_ends_with_the_theme_showing() {
+        let (s, r) = fixture();
+        for name in ["hyprland", "catppuccin-latte"] {
+            assert!(crate::theme::set(name));
+            for screen in SCREENS {
+                for (prompt, filter) in [(false, ""), (true, "ab"), (false, "ab")] {
+                    let mut scene = Scene::new(&s, &r);
+                    scene.screen = screen;
+                    (scene.browse.prompt, scene.browse.filter) = (prompt, filter.to_string());
+                    let t = text(&render_scene(&scene, 116, 40));
+                    let top = &t[0];
+                    let entry = format!(" t {name} ┐");
+                    assert!(top.ends_with(&entry), "{screen:?} {prompt} {filter}: {top}");
+                    let before: String = top.chars().take(top.chars().count() - entry.chars().count()).collect();
+                    assert!(before.ends_with(" ─") || before.ends_with("──"), "{screen:?}: {top}");
+                    assert!(before.contains("hyprscope"), "{top}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_selected_row_is_readable_in_a_bright_theme() {
+        assert!(crate::theme::set("github-light"));
+        let selected = crate::theme::current().selected;
+        let mut seen = false;
+        for b in all_screens() {
+            for c in b.content().iter().filter(|c| c.bg == selected && c.symbol() != " ") {
+                seen = true;
+                assert_ne!(c.fg, c.bg);
+            }
+        }
+        assert!(seen);
     }
 }

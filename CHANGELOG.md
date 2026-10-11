@@ -4,6 +4,9 @@ All notable changes to hyprscope are listed here, newest first.
 
 ## Unreleased
 
+- Twenty-six colour themes: `--theme NAME` starts with one showing, and `t` and `T` step through them while it runs. The name shows in the top border, and the `terminal` theme uses your terminal's own colours.
+- The repository is public, and pull requests are merged directly.
+
 ## 0.2.1 - 2026-10-08
 
 - The README describes the six full-screen views, and its picture shows the front page as it now is.

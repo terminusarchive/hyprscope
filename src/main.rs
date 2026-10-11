@@ -20,6 +20,7 @@ mod monitors_zoom;
 mod processes;
 #[cfg(test)]
 mod testdir;
+mod theme;
 mod tree;
 mod ui;
 mod usage;
@@ -136,6 +137,8 @@ enum Action {
     Zoom(u8),
     /// The Events screen's own browsing took the key; only a redraw is wanted.
     Browsed,
+    /// `t` (forward) or `T` (back): show the next theme, or the previous.
+    Theme(bool),
     None,
 }
 
@@ -312,6 +315,8 @@ fn on_key(key: KeyEvent) -> Action {
         KeyCode::Enter => Action::Inspect,
         KeyCode::Esc => Action::Back,
         KeyCode::Char(c @ '1'..='6') => Action::Zoom(c as u8 - b'0'),
+        KeyCode::Char('t') if !key.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) => Action::Theme(true),
+        KeyCode::Char('T') if !key.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) => Action::Theme(false),
         _ => Action::None,
     }
 }
@@ -405,11 +410,17 @@ enum Cli {
     Run,
     Version,
     Help,
+    /// Run with this theme showing; the name is one of `theme::NAMES`.
+    Theme(String),
+    /// `--theme` with a name that is not a theme.
+    BadTheme(String),
+    /// `--theme` with nothing after it.
+    NoTheme,
     /// An argument that is not accepted, as it is shown to the user.
     Unknown(String),
 }
 
-/// Exactly one argument is accepted: `-V`, `--version`, `-h` or `--help`.
+/// At most one option is accepted: `-V`, `--version`, `-h`, `--help` or `--theme NAME`.
 fn parse_args(args: impl IntoIterator<Item = std::ffi::OsString>) -> Cli {
     let mut args = args.into_iter();
     let Some(first) = args.next() else {
@@ -418,6 +429,13 @@ fn parse_args(args: impl IntoIterator<Item = std::ffi::OsString>) -> Cli {
     let cli = match first.to_str() {
         Some("-V" | "--version") => Cli::Version,
         Some("-h" | "--help") => Cli::Help,
+        Some("--theme") => match args.next() {
+            None => Cli::NoTheme,
+            Some(name) => match name.to_str() {
+                Some(n) if theme::NAMES.contains(&n) => Cli::Theme(n.to_owned()),
+                _ => return Cli::BadTheme(name.to_string_lossy().into_owned()),
+            },
+        },
         _ => return Cli::Unknown(first.to_string_lossy().into_owned()),
     };
     match args.next() {
@@ -439,6 +457,8 @@ Usage: hyprscope [OPTION]
 Options:
   -h, --help     Show this help and exit
   -V, --version  Show the version and exit
+  --theme NAME   Start with the theme NAME showing; t and T change it
+                 NAMES
 
 Keys:
   Up, k             Previous window or monitor; scroll Events, Log or Config
@@ -454,6 +474,7 @@ Keys:
   r                 Events view: show the events as Hyprland sent them
   Home              Events or Log view: back to the newest line; Config: top
   End               Events or Log view: the oldest line; Config: bottom
+  t, T              Next or previous theme
   Enter             Open the Windows view with the inspector
   Esc               Close filter prompt, clear a kept filter; else front page
   q, Ctrl-C         Quit
@@ -465,6 +486,41 @@ least {} columns by {} rows.
         ui::MIN_WIDTH,
         ui::MIN_HEIGHT
     )
+    .replace("NAMES", &wrapped_names())
+}
+
+/// The theme names, comma separated, on lines that stay within the help's 80 columns
+/// under the option's description.
+fn wrapped_names() -> String {
+    const INDENT: &str = "                 ";
+    let mut out = String::new();
+    let mut line = INDENT.len();
+    for (i, name) in theme::NAMES.iter().enumerate() {
+        let item = if i + 1 < theme::NAMES.len() { format!("{name}, ") } else { (*name).to_owned() };
+        if line + item.trim_end().len() > 80 {
+            out = out.trim_end().to_owned();
+            out.push('\n');
+            out.push_str(INDENT);
+            line = INDENT.len();
+        }
+        out.push_str(&item);
+        line += item.len();
+    }
+    out
+}
+
+/// Shows the theme the command line asks for; the dashboard has not drawn yet.
+fn start_with(cli: &Cli) {
+    if let Cli::Theme(name) = cli {
+        theme::set(name);
+    }
+}
+
+/// Prints a usage error on standard error; the status is 2.
+fn usage_error(message: &str) -> ExitCode {
+    use std::io::Write;
+    let _ = writeln!(std::io::stderr().lock(), "hyprscope: {message}\nTry 'hyprscope --help'.");
+    ExitCode::from(2)
 }
 
 /// Writes to standard output, ignoring a closed pipe (`hyprscope --help | head -1`).
@@ -475,18 +531,18 @@ fn print_out(text: &str) -> ExitCode {
 }
 
 fn main() -> ExitCode {
-    match parse_args(std::env::args_os().skip(1)) {
-        Cli::Run => {}
+    let cli = parse_args(std::env::args_os().skip(1));
+    match &cli {
+        Cli::Run | Cli::Theme(_) => start_with(&cli),
+        Cli::BadTheme(name) => {
+            return usage_error(&format!("unknown theme '{name}'\nThe themes are: {}.", theme::NAMES.join(", ")))
+        }
+        Cli::NoTheme => {
+            return usage_error(&format!("--theme needs a name\nThe themes are: {}.", theme::NAMES.join(", ")))
+        }
         Cli::Version => return print_out(&version_text()),
         Cli::Help => return print_out(&help_text()),
-        Cli::Unknown(arg) => {
-            use std::io::Write;
-            let _ = writeln!(
-                std::io::stderr().lock(),
-                "hyprscope: unknown argument '{arg}'\nTry 'hyprscope --help'."
-            );
-            return ExitCode::from(2);
-        }
+        Cli::Unknown(arg) => return usage_error(&format!("unknown argument '{arg}'")),
     }
     run_dashboard()
 }
@@ -688,6 +744,10 @@ fn run(
                             layers = fetch_layers(hypr, screen);
                             dirty = true;
                         }
+                    }
+                    Action::Theme(forward) => {
+                        theme::step(forward);
+                        dirty = true;
                     }
                     Action::None => {}
                     }
@@ -895,6 +955,40 @@ mod tests {
         route(screen, browse, &mut log_zoom::Floor::default(), &mut config_zoom::State::default(), key, &[3, 2, 1], 2, (0, 0))
     }
 
+    #[test]
+    fn t_and_t_change_the_theme_only_without_ctrl_and_alt() {
+        for c in ['t', 'T'] {
+            for m in [KeyModifiers::CONTROL, KeyModifiers::ALT] {
+                assert_eq!(on_key(KeyEvent::new(KeyCode::Char(c), m)), Action::None);
+            }
+        }
+        assert_eq!(on_key(KeyEvent::new(KeyCode::Char('T'), KeyModifiers::SHIFT)), Action::Theme(false));
+    }
+
+    #[test]
+    fn t_and_t_reach_the_theme_beside_a_kept_filter_and_a_pause() {
+        let theme_keys = |screen: Screen, browse: &mut Browse| {
+            assert_eq!(routed(screen, browse, press(KeyCode::Char('t'))), Action::Theme(true), "{screen:?}");
+            assert_eq!(routed(screen, browse, press(KeyCode::Char('T'))), Action::Theme(false), "{screen:?}");
+        };
+        for screen in [Screen::Windows, Screen::Events, Screen::Log, Screen::Config] {
+            let mut browse = Browse::default();
+            routed(screen, &mut browse, press(KeyCode::Char('/')));
+            routed(screen, &mut browse, press(KeyCode::Char('a')));
+            routed(screen, &mut browse, press(KeyCode::Enter));
+            assert!(!browse.prompt && browse.filter == "a", "{screen:?}");
+            theme_keys(screen, &mut browse);
+            assert!(!browse.prompt && browse.filter == "a", "{screen:?}");
+        }
+        for screen in [Screen::Events, Screen::Log] {
+            let mut browse = Browse::default();
+            routed(screen, &mut browse, press(KeyCode::Char(' ')));
+            assert!(browse.paused());
+            theme_keys(screen, &mut browse);
+            assert!(browse.paused(), "{screen:?}");
+        }
+    }
+
     fn typing(text: &str) -> Browse {
         let mut browse = Browse::default();
         routed(Screen::Events, &mut browse, press(KeyCode::Char('/')));
@@ -936,6 +1030,26 @@ mod tests {
         assert_eq!(routed(Screen::Windows, &mut browse, press(KeyCode::Char('r'))), Action::None);
         assert_eq!(routed(Screen::Front, &mut browse, press(KeyCode::Down)), Action::Move(Move::Next));
         assert!(!browse.prompt && !browse.raw);
+    }
+
+    #[test]
+    fn t_and_shift_t_change_the_theme_on_every_screen_and_are_text_in_an_open_prompt() {
+        let shifted = KeyEvent::new(KeyCode::Char('T'), KeyModifiers::SHIFT);
+        for screen in [Screen::Front, Screen::Windows, Screen::Hyprland, Screen::Monitors, Screen::Events, Screen::Log, Screen::Config] {
+            let mut browse = Browse::default();
+            assert_eq!(routed(screen, &mut browse, press(KeyCode::Char('t'))), Action::Theme(true), "{screen:?}");
+            assert_eq!(routed(screen, &mut browse, press(KeyCode::Char('T'))), Action::Theme(false), "{screen:?}");
+            assert_eq!(routed(screen, &mut browse, shifted), Action::Theme(false), "{screen:?}");
+            assert!(!browse.prompt && browse.filter.is_empty());
+        }
+        for screen in [Screen::Windows, Screen::Events, Screen::Log, Screen::Config] {
+            let mut browse = Browse::default();
+            routed(screen, &mut browse, press(KeyCode::Char('/')));
+            for key in [press(KeyCode::Char('t')), press(KeyCode::Char('T')), shifted] {
+                assert_eq!(routed(screen, &mut browse, key), Action::Browsed, "{screen:?}");
+            }
+            assert_eq!(browse.filter, "tTT", "{screen:?}");
+        }
     }
 
     #[test]
@@ -1352,6 +1466,36 @@ mod tests {
     }
 
     #[test]
+    fn theme_takes_a_name_from_the_list() {
+        assert_eq!(parse_args(args(&["--theme", "dracula"])), Cli::Theme("dracula".into()));
+        for name in theme::NAMES {
+            assert_eq!(parse_args(args(&["--theme", name])), Cli::Theme(name.into()));
+        }
+        assert_eq!(parse_args(args(&["--theme", "nope"])), Cli::BadTheme("nope".into()));
+        assert_eq!(parse_args(args(&["--theme"])), Cli::NoTheme);
+        assert_eq!(parse_args(args(&["--theme", "dracula", "extra"])), Cli::Unknown("extra".into()));
+    }
+
+    #[test]
+    fn starting_with_a_theme_shows_it_before_the_first_draw() {
+        let before = theme::name();
+        start_with(&Cli::Theme("dracula".into()));
+        assert_eq!(theme::name(), "dracula");
+        start_with(&Cli::Run);
+        assert_eq!(theme::name(), "dracula", "no option leaves the theme alone");
+        theme::set(before);
+    }
+
+    #[test]
+    fn help_describes_the_theme_option_and_lists_the_names() {
+        let text = help_text();
+        assert!(text.contains("--theme NAME"));
+        for name in theme::NAMES {
+            assert!(text.contains(name), "{name}");
+        }
+    }
+
+    #[test]
     fn an_argument_that_is_not_utf8_is_unknown_and_shown_lossily() {
         use std::os::unix::ffi::OsStringExt;
         let bad = std::ffi::OsString::from_vec(vec![b'-', 0xff]);
@@ -1386,7 +1530,7 @@ mod tests {
             });
             assert!(listed, "{name} is handled but not in the help");
         }
-        for key in ["Space", "/", "r", "Home"] {
+        for key in ["Space", "/", "r", "Home", "t", "T"] {
             let listed = text.lines().any(|l| l.trim_start().split("  ").next().is_some_and(|keys| keys.split(", ").any(|k| k == key)));
             assert!(listed, "{key} is not in the help");
         }
@@ -1407,7 +1551,7 @@ mod tests {
                 // The numbers with a view are checked against the help above; the loop ignores
                 // the others (2 and 6 until their panels have a view), so they need no line.
                 Action::Zoom(n) => assert!((1..=6).contains(&n)),
-                _ => assert!(matches!(c, 'q' | 'k' | 'j'), "'{c}' is handled but not listed"),
+                _ => assert!(matches!(c, 'q' | 'k' | 'j' | 't' | 'T'), "'{c}' is handled but not listed"),
             }
         }
         for code in [KeyCode::Left, KeyCode::Right, KeyCode::Home, KeyCode::End, KeyCode::Tab] {

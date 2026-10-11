@@ -10,7 +10,8 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use crate::hyprland_panel::{bytes, percent, uptime};
 use crate::hypr::Window;
 use crate::inspect::{Details, Property};
-use crate::ui::{CYAN, DIM, MONITOR, MUTED, PANEL_BORDER, clean, fit, width};
+use crate::ui::{clean, fit, width};
+use crate::theme;
 use crate::usage::{ProcessInfo, Sample};
 
 /// Everything the panel draws.
@@ -37,20 +38,20 @@ const GAP: usize = 2;
 const FIXED_ROWS: usize = 4;
 
 pub fn draw(frame: &mut Frame, area: Rect, inspection: &Inspection) {
-    let heading = Style::new().fg(CYAN).add_modifier(Modifier::BOLD);
-    let mut block = Block::new().borders(Borders::ALL).border_style(Style::new().fg(PANEL_BORDER));
+    let heading = Style::new().fg(theme::current().cyan).add_modifier(Modifier::BOLD);
+    let mut block = Block::new().borders(Borders::ALL).border_style(Style::new().fg(theme::current().panel_border));
     block = match inspection.window {
         Some(w) => block.title_top(Line::from(vec![
             Span::styled(format!(" {}", clean(&w.class)), heading),
-            Span::styled(" ─ ", Style::new().fg(MUTED)),
-            Span::styled(format!("0x{} ", w.address.strip_prefix("0x").unwrap_or(&w.address)), Style::new().fg(MONITOR)),
+            Span::styled(" ─ ", Style::new().fg(theme::current().muted)),
+            Span::styled(format!("0x{} ", w.address.strip_prefix("0x").unwrap_or(&w.address)), Style::new().fg(theme::current().monitor)),
         ])),
         None => block.title_top(Line::from(Span::styled(" Inspector ", heading))),
     };
     let inner = block.inner(area);
     frame.render_widget(block, area);
     let Some(w) = inspection.window else {
-        let line = Line::from(Span::styled(" no window selected", Style::new().fg(MUTED)));
+        let line = Line::from(Span::styled(" no window selected", Style::new().fg(theme::current().muted)));
         frame.render_widget(Paragraph::new(line), Rect::new(inner.x, inner.y, inner.width, 1).intersection(inner));
         return;
     };
@@ -98,7 +99,7 @@ pub fn draw(frame: &mut Frame, area: Rect, inspection: &Inspection) {
     let room = (inner.height as usize).saturating_sub(top + 1);
     let grid = Grid::new(&inspection.details.properties, content.saturating_sub(1), room);
     let rows = if inspection.details.properties.is_empty() {
-        vec![Line::from(Span::styled("unavailable", Style::new().fg(MUTED)))]
+        vec![Line::from(Span::styled("unavailable", Style::new().fg(theme::current().muted)))]
     } else {
         grid.lines(&inspection.details.properties)
     };
@@ -186,7 +187,7 @@ fn clip(lines: Vec<String>, n: usize, w: usize) -> Vec<String> {
 
 /// The Process lines that have something to say, each fitting `w`.
 fn process_lines(i: &Inspection, w: usize) -> Vec<Line<'static>> {
-    let muted = Style::new().fg(MUTED);
+    let muted = Style::new().fg(theme::current().muted);
     let joined = |parts: Vec<String>| (!parts.is_empty()).then(|| parts.join(" · "));
     let p = i.process;
     let mut out = Vec::new();
@@ -327,7 +328,7 @@ impl Grid {
                         spans.push(Span::raw(" ".repeat(GUTTER)));
                     }
                     if at + 1 == capacity && !self.all_shown() {
-                        spans.push(Span::styled(fit(&format!("… {hidden} more"), w), Style::new().fg(MUTED)));
+                        spans.push(Span::styled(fit(&format!("… {hidden} more"), w), Style::new().fg(theme::current().muted)));
                     } else {
                         spans.extend(cell(&props[at], w));
                     }
@@ -346,13 +347,13 @@ fn cell(p: &Property, w: usize) -> Vec<Span<'static>> {
     let pad = w.saturating_sub(width(p.name) + width(&p.value));
     if pad < 1 {
         let text = fit(&format!("{} {}", p.name, p.value), w);
-        return vec![Span::styled(text, Style::new().fg(if p.plain { DIM } else { MUTED }))];
+        return vec![Span::styled(text, Style::new().fg(if p.plain { theme::current().dim } else { theme::current().muted }))];
     }
     let gap = " ".repeat(pad);
     if p.plain {
-        vec![Span::styled(format!("{}{gap}{}", p.name, p.value), Style::new().fg(DIM))]
+        vec![Span::styled(format!("{}{gap}{}", p.name, p.value), Style::new().fg(theme::current().dim))]
     } else {
-        vec![Span::styled(p.name, Style::new().fg(MUTED)), Span::raw(gap), Span::raw(p.value.clone())]
+        vec![Span::styled(p.name, Style::new().fg(theme::current().muted)), Span::raw(gap), Span::raw(p.value.clone())]
     }
 }
 

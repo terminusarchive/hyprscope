@@ -10,7 +10,8 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use crate::browse::Browse;
 use crate::log::{Line, Log, Rank, WORDS};
 use crate::log_panel;
-use crate::ui::{ACCENT, BAD, DIM, MUTED, PANEL_BORDER, clean, clean_width, commas, counted, fit, pad, width};
+use crate::ui::{clean, clean_width, commas, counted, fit, pad, width};
+use crate::theme;
 
 /// The lowest level shown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -136,8 +137,8 @@ fn title(log: &Log, browse: &Browse, floor: Floor, count: usize, new: usize, roo
     if browse.paused() {
         rest.push_str(&format!(" ─ paused ─ {} new", commas(new)));
     }
-    line.push_span(Span::styled("─ ", Style::new().fg(PANEL_BORDER)));
-    line.push_span(Span::styled(format!("{rest} "), Style::new().fg(MUTED)));
+    line.push_span(Span::styled("─ ", Style::new().fg(theme::current().panel_border)));
+    line.push_span(Span::styled(format!("{rest} "), Style::new().fg(theme::current().muted)));
     line
 }
 
@@ -152,17 +153,17 @@ pub fn draw(frame: &mut Frame, area: Rect, log: &Log, browse: &Browse, floor: Fl
     let (first, new) = browse.window(&seqs, page(area, log, floor));
     let block = Block::new()
         .borders(Borders::ALL)
-        .border_style(Style::new().fg(PANEL_BORDER))
+        .border_style(Style::new().fg(theme::current().panel_border))
         .title_top(title(log, browse, floor, seqs.len(), new, area.width.saturating_sub(2) as usize));
     let body = block.inner(area);
     frame.render_widget(block, area);
 
     let gone = dropped(log, floor);
     let lines = if !log.available() {
-        vec![note("log unavailable".into(), MUTED)]
+        vec![note("log unavailable".into(), theme::current().muted)]
     } else if seqs.is_empty() && gone == 0 {
         let what = if browse.filter.is_empty() { floor.nothing() } else { "no lines match" };
-        vec![note(what.into(), DIM)]
+        vec![note(what.into(), theme::current().dim)]
     } else {
         let all: Vec<&Line> = seqs.iter().filter_map(|&s| log.line(s)).collect();
         // Fixed, so the messages stay put when `l` changes the level in force.
@@ -176,14 +177,14 @@ pub fn draw(frame: &mut Frame, area: Rect, log: &Log, browse: &Browse, floor: Fl
             .take(body.height as usize)
             .map(|l| {
                 let (colour, message) = match l.rank {
-                    Rank::Error => (BAD, Style::new()),
-                    Rank::Warning => (ACCENT, Style::new()),
-                    Rank::Lower => (MUTED, Style::new().fg(MUTED)),
+                    Rank::Error => (theme::current().bad, Style::new()),
+                    Rank::Warning => (theme::current().accent, Style::new()),
+                    Rank::Lower => (theme::current().muted, Style::new().fg(theme::current().muted)),
                 };
                 let mut spans = vec![Span::raw(" ")];
                 spans.push(Span::styled(pad(l.level, level + GAP), Style::new().fg(colour)));
                 if part > 0 {
-                    spans.push(Span::styled(pad(&clean(&l.part), part + GAP), Style::new().fg(MUTED)));
+                    spans.push(Span::styled(pad(&clean(&l.part), part + GAP), Style::new().fg(theme::current().muted)));
                 }
                 spans.push(Span::styled(fit(&clean(&l.message), text), message));
                 Text::from(spans)
@@ -191,7 +192,7 @@ pub fn draw(frame: &mut Frame, area: Rect, log: &Log, browse: &Browse, floor: Fl
             .collect();
         // The dropped row follows the oldest line, so it is in view once that line is.
         if gone > 0 && lines.len() < body.height as usize && first + lines.len() >= all.len() {
-            lines.push(note(format!("… {} not kept", counted(gone as usize, "earlier line")), DIM));
+            lines.push(note(format!("… {} not kept", counted(gone as usize, "earlier line")), theme::current().dim));
         }
         lines
     };

@@ -38,12 +38,26 @@ and `/` filters the lists in the Windows, Events, Log and Config views.
 | `5` | Events | Every one of the last 2,000 events on its own line, with pause, a text filter and the raw form. |
 | `6` | Log | The warnings and errors, or every level, of Hyprland's log, with a text filter. |
 
+## Themes
+
+hyprscope has twenty-six colour themes. The first one, `hyprland`, is the default.
+
+- Dark: `hyprland`, `synthwave`, `dracula`, `nord`, `gruvbox`, `catppuccin`, `tokyo-night`, `solarized`, `monokai`, `one-dark`, `everforest`, `rose-pine`, `kanagawa`, `ayu`, `night-owl`, `github-dark`, `palenight`.
+- Bright: `solarized-light`, `gruvbox-light`, `catppuccin-latte`, `github-light`, and `paper`, which is also monochrome.
+- Monochrome: `mono`, `amber`, `green`, `paper`.
+- `terminal` uses your terminal's own sixteen colours and needs no 24-bit colour.
+
+`--theme NAME` starts with that theme showing. `t` shows the next theme and `T` the
+previous one, going round; the name shows at the right end of the top border. The choice
+is not saved between runs. `hyprland` and `terminal` keep your terminal's own background;
+the other themes paint theirs.
+
 ## Requirements
 
 - Linux, with a running Hyprland session. hyprscope reads Hyprland's IPC sockets and
   `/proc`, and the log file Hyprland writes. It was built and run on Hyprland 0.56.
   Other versions are untried.
-- A terminal with truecolour support, at least 116 columns by 32 rows. hyprscope does not
+- A terminal with truecolour support (the `terminal` theme needs none), at least 116 columns by 32 rows. hyprscope does not
   check for truecolour and always uses 24-bit colours, so a terminal without it shows
   wrong colours. In a smaller terminal it shows a message that says so.
 - A Rust toolchain to build it: Rust 1.88 or newer; built with 1.98.
@@ -90,6 +104,7 @@ terminal, prints one line and exits with status 1.
 | --- | --- |
 | `-V`, `--version` | Print the version and exit. |
 | `-h`, `--help` | Print a short help text and exit. |
+| `--theme NAME` | Start with the theme `NAME` showing. See [Themes](#themes). |
 
 Any other argument is an error: hyprscope names it on standard error and exits with
 status 2.
@@ -111,6 +126,7 @@ status 2.
 | `Home` | In the Events and Log views, go back to the newest line. In the Config view, go to the first row of the list. |
 | `End` | In the Events and Log views, go to the oldest line, which pauses the view. In the Config view, go to the last row of the list. |
 | `Esc` | From a full-screen view, back to the front page. In the Windows, Events, Log and Config views it first closes the filter prompt, or clears a kept filter. |
+| `t`, `T` | Show the next theme, or the previous one. |
 | `q`, `Ctrl-C` | Quit. |
 
 ## Contributing

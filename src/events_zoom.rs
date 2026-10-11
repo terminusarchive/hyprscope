@@ -11,7 +11,10 @@ use crate::browse::Browse;
 use crate::events::{self, Feed, Kept};
 use crate::events_panel::{GAP, SIDE, TIME, colour};
 use crate::graph;
-use crate::ui::{CYAN, MUTED, PANEL_BORDER, clean, clean_width, commas, counted, fit, pad};
+use crate::ui::{clean, clean_width, commas, counted, fit, pad};
+use crate::theme;
+#[cfg(test)]
+use crate::ui::{MUTED};
 use crate::usage;
 
 /// Events never scale below this many a second.
@@ -20,10 +23,10 @@ const FLOOR: f64 = 4.0;
 /// A panel's block: the shared border and a bold title, then `rest` in the muted colour.
 fn block(name: &str, rest: String) -> Block<'static> {
     let title = Line::from(vec![
-        Span::styled(format!(" {name}"), Style::new().fg(CYAN).add_modifier(Modifier::BOLD)),
-        Span::styled(format!("{rest} "), Style::new().fg(MUTED)),
+        Span::styled(format!(" {name}"), Style::new().fg(theme::current().cyan).add_modifier(Modifier::BOLD)),
+        Span::styled(format!("{rest} "), Style::new().fg(theme::current().muted)),
     ]);
-    Block::new().borders(Borders::ALL).border_style(Style::new().fg(PANEL_BORDER)).title_top(title)
+    Block::new().borders(Borders::ALL).border_style(Style::new().fg(theme::current().panel_border)).title_top(title)
 }
 
 /// The rate graph: events a second for as many seconds as fit, newest at the right.
@@ -36,13 +39,13 @@ pub fn draw_rate(frame: &mut Frame, area: Rect, feed: &Feed, now: u64) {
     let scale = usage::scale(&values, columns, FLOOR, false);
     let labels = [format!("{:.0}", scale.span), format!("{:.0}", scale.span / 2.0)];
     let rows = inner.height.saturating_sub(1);
-    let drawn = graph::render(&values, columns, rows as usize, FLOOR, false, graph::EVENTS, [&labels[0], &labels[1]]);
+    let drawn = graph::render(&values, columns, rows as usize, FLOOR, false, graph::events(), [&labels[0], &labels[1]]);
     graph::paint(&drawn, frame.buffer_mut(), Rect { height: rows, ..inner });
     // `now` seconds have passed since the start; the earlier columns are before hyprscope ran.
     let running = columns.min(now as usize);
     let average = values.iter().sum::<f64>() / running.max(1) as f64;
     let average = if average < 10.0 { format!("{average:.1}") } else { format!("{average:.0}") };
-    let muted = Style::new().fg(MUTED);
+    let muted = Style::new().fg(theme::current().muted);
     let summary = Line::from(vec![
         Span::styled(" peak ", muted),
         Span::raw(format!("{:.0}/s", scale.peak)),
@@ -96,7 +99,7 @@ pub fn draw_stream(frame: &mut Frame, area: Rect, feed: &Feed, browse: &Browse) 
     let base = feed.kept().front().map_or(0, |k| k.seq);
     let shown: Vec<&Kept> =
         seqs.iter().skip(first).take(rows).filter_map(|&s| feed.kept().get((s - base) as usize)).collect();
-    let muted = Style::new().fg(MUTED);
+    let muted = Style::new().fg(theme::current().muted);
     let space = body.width as usize;
     let lines: Vec<Line> = if browse.raw {
         let text = space.saturating_sub(SIDE + TIME + GAP.len() + SIDE);
@@ -161,7 +164,7 @@ pub fn draw_kinds(frame: &mut Frame, area: Rect, feed: &Feed) {
         })
         .collect();
     if listed < kinds.len() && rows > 0 {
-        lines.push(Line::from(Span::styled(format!(" … {} more", kinds.len() - listed), Style::new().fg(MUTED))));
+        lines.push(Line::from(Span::styled(format!(" … {} more", kinds.len() - listed), Style::new().fg(theme::current().muted))));
     }
     frame.render_widget(Paragraph::new(lines), body);
 }

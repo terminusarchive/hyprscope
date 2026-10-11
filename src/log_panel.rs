@@ -8,7 +8,10 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::log::{Level, Log, Tally};
-use crate::ui::{ACCENT, BAD, DIM, MUTED, PANEL_BORDER, clean, fit, pad, title_name, width};
+use crate::ui::{clean, fit, pad, title_name, width};
+use crate::theme;
+#[cfg(test)]
+use crate::ui::{ACCENT, BAD, DIM, MUTED, PANEL_BORDER};
 
 /// The space at each side inside the border.
 const SIDE: usize = 1;
@@ -23,14 +26,14 @@ pub fn draw(frame: &mut Frame, area: Rect, log: &Log, number: Option<u8>) {
     let tally = log.available().then(|| log.tally());
     let block = Block::new()
         .borders(Borders::ALL)
-        .border_style(Style::new().fg(PANEL_BORDER))
+        .border_style(Style::new().fg(theme::current().panel_border))
         .title_top(title(tally, area.width.saturating_sub(2) as usize, number));
     let body = block.inner(area);
     frame.render_widget(block, area);
 
     let lines = match tally {
-        None => vec![note("log unavailable", MUTED)],
-        Some(t) if t.lines.is_empty() => vec![note("no warnings or errors", DIM)],
+        None => vec![note("log unavailable", theme::current().muted)],
+        Some(t) if t.lines.is_empty() => vec![note("no warnings or errors", theme::current().dim)],
         Some(t) => rows(t, body.width as usize, body.height as usize),
     };
     frame.render_widget(Paragraph::new(lines), body);
@@ -51,14 +54,14 @@ pub(crate) fn title(tally: Option<&Tally>, room: usize, number: Option<u8>) -> L
     let Some(tally) = tally else {
         return Line::from(spans);
     };
-    for (label, count, colour) in [("ERR", tally.errors, BAD), ("WARN", tally.warnings, ACCENT)] {
+    for (label, count, colour) in [("ERR", tally.errors, theme::current().bad), ("WARN", tally.warnings, theme::current().accent)] {
         let text = format!("{label} {count}");
         if used + 2 + width(&text) + 1 > room {
             break;
         }
         used += 2 + width(&text) + 1;
-        let colour = if count == 0 { DIM } else { colour };
-        spans.push(Span::styled("─ ", Style::new().fg(PANEL_BORDER)));
+        let colour = if count == 0 { theme::current().dim } else { colour };
+        spans.push(Span::styled("─ ", Style::new().fg(theme::current().panel_border)));
         spans.push(Span::styled(text, Style::new().fg(colour)));
         spans.push(Span::raw(" "));
     }
@@ -82,9 +85,9 @@ fn rows(tally: &Tally, room: usize, height: usize) -> Vec<Line<'static>> {
         .zip(&counts)
         .map(|(e, count)| {
             let (name, colour) = match e.level {
-                Level::Warn => ("WARN", ACCENT),
-                Level::Err => ("ERR", BAD),
-                Level::Crit => ("CRIT", BAD),
+                Level::Warn => ("WARN", theme::current().accent),
+                Level::Err => ("ERR", theme::current().bad),
+                Level::Crit => ("CRIT", theme::current().bad),
             };
             let mut spans = vec![
                 Span::raw(" "),
@@ -101,7 +104,7 @@ fn rows(tally: &Tally, room: usize, height: usize) -> Vec<Line<'static>> {
                 spans.push(Span::raw(" ".repeat(GAP)));
                 spans.push(Span::styled(
                     format!("{count:>slot$}"),
-                    Style::new().fg(MUTED),
+                    Style::new().fg(theme::current().muted),
                 ));
             }
             Line::from(spans)

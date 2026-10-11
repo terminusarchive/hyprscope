@@ -10,7 +10,8 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use crate::graph::{self, Shades};
 use crate::hyprland_panel::{bytes, percent};
 use crate::processes::Row;
-use crate::ui::{CYAN, GUIDE, MUTED, PANEL_BORDER, clean, fit, pad, width};
+use crate::ui::{clean, fit, pad, width};
+use crate::theme;
 use crate::usage::{self, History};
 
 const MIB: f64 = 1024.0 * 1024.0;
@@ -34,7 +35,7 @@ impl Metric {
         [
             Metric {
                 name: "CPU",
-                shades: graph::CPU,
+                shades: graph::cpu(),
                 values: history.iter().filter_map(|s| s.cpu).collect(),
                 current: newest.and_then(|s| s.cpu).map(percent),
                 floor: 10.0,
@@ -42,7 +43,7 @@ impl Metric {
             },
             Metric {
                 name: "MEM",
-                shades: graph::MEM,
+                shades: graph::mem(),
                 values: history.iter().filter_map(|s| s.mem.map(|m| m as f64)).collect(),
                 current: newest.and_then(|s| s.mem).map(|m| bytes(m as f64)),
                 floor: 16.0 * MIB,
@@ -50,7 +51,7 @@ impl Metric {
             },
             Metric {
                 name: "GPU",
-                shades: graph::GPU,
+                shades: graph::gpu(),
                 values: history.iter().filter_map(|s| s.gpu.as_ref()?.percent).collect(),
                 current: gpu.map(percent),
                 floor: 10.0,
@@ -66,7 +67,7 @@ impl Metric {
 
     /// The summary line: the peak, then the average or, for memory, the low.
     fn summary(&self, scale: &usage::Scale) -> Line<'static> {
-        let muted = Style::new().fg(MUTED);
+        let muted = Style::new().fg(theme::current().muted);
         let (second, figure) = if self.from_low {
             ("  low ", bytes(scale.low))
         } else {
@@ -92,15 +93,15 @@ pub fn draw_graphs(frame: &mut Frame, areas: [Rect; 3], history: &History) {
 
 fn draw_graph(frame: &mut Frame, area: Rect, metric: &Metric) {
     let title = Line::from(vec![
-        Span::styled(format!(" {}", metric.name), Style::new().fg(CYAN).add_modifier(Modifier::BOLD)),
+        Span::styled(format!(" {}", metric.name), Style::new().fg(theme::current().cyan).add_modifier(Modifier::BOLD)),
         // Reset on purpose: a title is drawn over the border, whose colour it would otherwise keep.
         Span::styled(format!(" {} ", metric.current.as_deref().unwrap_or("n/a")), Style::new().fg(Color::Reset)),
     ]);
-    let block = Block::new().borders(Borders::ALL).border_style(Style::new().fg(PANEL_BORDER)).title_top(title);
+    let block = Block::new().borders(Borders::ALL).border_style(Style::new().fg(theme::current().panel_border)).title_top(title);
     let inner = block.inner(area);
     frame.render_widget(block, area);
     if metric.values.is_empty() {
-        frame.render_widget(Paragraph::new(Span::styled(" n/a", Style::new().fg(MUTED))), inner);
+        frame.render_widget(Paragraph::new(Span::styled(" n/a", Style::new().fg(theme::current().muted))), inner);
         return;
     }
     let columns = inner.width as usize;
@@ -138,10 +139,10 @@ const FIGURES: [usize; 3] = [6, 8, 6];
 /// The process table in `area`.
 pub fn draw_table(frame: &mut Frame, area: Rect, rows: &[Row]) {
     let title = Line::from(vec![
-        Span::styled(" Processes", Style::new().fg(CYAN).add_modifier(Modifier::BOLD)),
-        Span::styled(format!(" ─ {} with windows ", rows.len().saturating_sub(1)), Style::new().fg(MUTED)),
+        Span::styled(" Processes", Style::new().fg(theme::current().cyan).add_modifier(Modifier::BOLD)),
+        Span::styled(format!(" ─ {} with windows ", rows.len().saturating_sub(1)), Style::new().fg(theme::current().muted)),
     ]);
-    let block = Block::new().borders(Borders::ALL).border_style(Style::new().fg(PANEL_BORDER)).title_top(title);
+    let block = Block::new().borders(Borders::ALL).border_style(Style::new().fg(theme::current().panel_border)).title_top(title);
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -155,7 +156,7 @@ pub fn draw_table(frame: &mut Frame, area: Rect, rows: &[Row]) {
         largest(|r| r.mem.map(|m| m as f64), 0.0),
         largest(|r| r.gpu, 100.0),
     ];
-    let muted = Style::new().fg(MUTED);
+    let muted = Style::new().fg(theme::current().muted);
     let groups = ["CPU", "MEMORY", "GPU"];
     let mut heading = vec![
         Span::styled(format!(" {}{GAP}", pad("PROCESS", name)), muted),
@@ -175,10 +176,10 @@ pub fn draw_table(frame: &mut Frame, area: Rect, rows: &[Row]) {
         let windows = if row.windows == 0 { "─".to_string() } else { row.windows.to_string() };
         spans.push(Span::raw(format!("{GAP}{windows:>WINDOWS$}{GAP}{:>PROCS$}", row.procs)));
         let figures = [
-            (row.cpu, row.cpu.map(percent), "--", graph::CPU, scales[0]),
-            (row.mem.map(|m| m as f64), row.mem.map(|m| bytes(m as f64)), "n/a", graph::MEM, scales[1]),
+            (row.cpu, row.cpu.map(percent), "--", graph::cpu(), scales[0]),
+            (row.mem.map(|m| m as f64), row.mem.map(|m| bytes(m as f64)), "n/a", graph::mem(), scales[1]),
             // A GPU figure that is missing along with the CPU's is still waiting for its second reading.
-            (row.gpu, row.gpu.map(percent), if row.cpu.is_none() { "--" } else { "n/a" }, graph::GPU, scales[2]),
+            (row.gpu, row.gpu.map(percent), if row.cpu.is_none() { "--" } else { "n/a" }, graph::gpu(), scales[2]),
         ];
         for ((value, text, missing, shades, scale), figure) in figures.into_iter().zip(FIGURES) {
             spans.push(Span::raw(GAP));
@@ -208,7 +209,7 @@ fn bar_spans(value: Option<f64>, scale: f64, cells: usize, colour: Color) -> [Sp
     let filled = value.map_or(0, |v| ((v / scale * cells as f64).round() as usize).clamp(1, cells));
     [
         Span::styled("▇".repeat(filled), Style::new().fg(colour)),
-        Span::styled("░".repeat(cells - filled), Style::new().fg(GUIDE)),
+        Span::styled("░".repeat(cells - filled), Style::new().fg(theme::current().guide)),
     ]
 }
 

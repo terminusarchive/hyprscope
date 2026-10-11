@@ -11,7 +11,8 @@ use crate::browse::Outcome;
 use crate::config::{AnimationInfo, BindInfo, Curve, Details, Devices, OptionInfo, Summary};
 use crate::config_panel::{Part, clip, muted, plain, verdict};
 use crate::grid;
-use crate::ui::{ACCENT, CYAN, DIM, MONITOR, MUTED, PANEL_BORDER, clean, clean_width, commas, counted, fit, width};
+use crate::ui::{clean, clean_width, commas, counted, fit, width};
+use crate::theme;
 use crate::curve;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -87,7 +88,7 @@ impl Tab {
 }
 
 fn dim() -> Style {
-    Style::default().fg(DIM)
+    Style::default().fg(theme::current().dim)
 }
 
 fn cell(text: impl Into<String>, style: Style) -> Cell {
@@ -127,7 +128,7 @@ fn options_groups(list: &[OptionInfo], every: bool) -> Vec<(String, Vec<Entry>)>
         let value_style = if o.is_default() { dim() } else { Style::default() };
         let mut cells = Vec::new();
         if every {
-            cells.push(self::cell(if o.set { "●" } else { "" }, Style::default().fg(ACCENT)));
+            cells.push(self::cell(if o.set { "●" } else { "" }, Style::default().fg(theme::current().accent)));
         }
         cells.push(self::cell(rest, Style::default()));
         cells.push(self::cell(o.value.as_deref().unwrap_or("n/a"), value_style));
@@ -391,13 +392,13 @@ fn noun(tab: Tab) -> &'static str {
 
 /// A panel's border and title: the name in bold cyan, then the figures in muted.
 fn panel(name: &str, figures: &str) -> Block<'static> {
-    let mut title = vec![Span::styled(format!(" {name}"), Style::new().fg(CYAN).add_modifier(Modifier::BOLD))];
+    let mut title = vec![Span::styled(format!(" {name}"), Style::new().fg(theme::current().cyan).add_modifier(Modifier::BOLD))];
     if !figures.is_empty() {
-        title.push(Span::styled(format!(" ─ {figures} "), Style::new().fg(MUTED)));
+        title.push(Span::styled(format!(" ─ {figures} "), Style::new().fg(theme::current().muted)));
     } else {
         title.push(Span::raw(" "));
     }
-    Block::new().borders(Borders::ALL).border_style(Style::new().fg(PANEL_BORDER)).title_top(Line::from(title))
+    Block::new().borders(Borders::ALL).border_style(Style::new().fg(theme::current().panel_border)).title_top(Line::from(title))
 }
 
 fn figures_text(listing: &Listing, tab: Tab, filter: &str) -> String {
@@ -429,7 +430,7 @@ fn header_line(summary: &Summary, provider: Option<&str>, file: Option<&str>, re
         push(vec![muted(&p)]);
     }
     if let Some(f) = file.map(clean).filter(|f| !f.is_empty()) {
-        push(vec![(f, Style::new().fg(MONITOR))]);
+        push(vec![(f, Style::new().fg(theme::current().monitor))]);
     }
     if let Some(t) = reloaded {
         push(vec![muted("reloaded "), plain(&clean(t))]);
@@ -456,7 +457,7 @@ fn tab_line(open: Tab, width: usize) -> Line<'static> {
             parts.push(plain("  "));
         }
         parts.push(if *tab == open {
-            (format!("▌{}▐", tab.name()), Style::new().fg(ACCENT).add_modifier(Modifier::BOLD))
+            (format!("▌{}▐", tab.name()), Style::new().fg(theme::current().accent).add_modifier(Modifier::BOLD))
         } else {
             muted(tab.name())
         });
@@ -473,7 +474,7 @@ fn draw_errors(frame: &mut Frame, area: Rect, errors: &[String]) {
     let shown = if errors.len() <= height { errors.len() } else { height.saturating_sub(1) };
     let mut lines: Vec<Line> = errors[..shown].iter().map(|e| Line::from(format!(" {}", fit(&clean(e), room.saturating_sub(SIDE))))).collect();
     if shown < errors.len() && height > 0 {
-        lines.push(Line::from(Span::styled(format!(" … {} more", errors.len() - shown), Style::new().fg(DIM))));
+        lines.push(Line::from(Span::styled(format!(" … {} more", errors.len() - shown), Style::new().fg(theme::current().dim))));
     }
     frame.render_widget(Paragraph::new(lines), inner);
 }
@@ -499,7 +500,7 @@ fn table_line(cells: &[(String, Style)], widths: &[usize], room: usize) -> Line<
 }
 
 fn note(text: String) -> Line<'static> {
-    Line::from(vec![Span::raw(" "), Span::styled(text, Style::new().fg(DIM))])
+    Line::from(vec![Span::raw(" "), Span::styled(text, Style::new().fg(theme::current().dim))])
 }
 
 fn draw_list(frame: &mut Frame, area: Rect, listing: &Listing, state: &State, filter: &str) {
@@ -538,7 +539,7 @@ fn draw_list(frame: &mut Frame, area: Rect, listing: &Listing, state: &State, fi
     let room = inner.width as usize;
     let mut lines = Vec::new();
     if !headings.is_empty() {
-        let cells: Vec<_> = headings.iter().map(|h| (h.to_string(), Style::new().fg(MUTED))).collect();
+        let cells: Vec<_> = headings.iter().map(|h| (h.to_string(), Style::new().fg(theme::current().muted))).collect();
         lines.push(table_line(&cells, &widths, room));
     }
     let page = (inner.height as usize).saturating_sub(lines.len());
@@ -599,12 +600,12 @@ fn draw_curves(frame: &mut Frame, area: Rect, curves: &[Curve]) {
         let (x, y) = (SIDE + i % across * SLOT_WIDTH, i / across * SLOT_HEIGHT);
         put(frame, inner, x, y, fit(&clean(&curve.name), SLOT_WIDTH - 1), Style::new());
         for (r, line) in curve::plot(curve.points, PLOT_COLUMNS, PLOT_ROWS).into_iter().enumerate() {
-            put(frame, inner, x, y + 1 + r, line, Style::new().fg(CYAN));
+            put(frame, inner, x, y + 1 + r, line, Style::new().fg(theme::current().cyan));
         }
-        put(frame, inner, x, y + 1 + PLOT_ROWS, fit(&points_text(curve.points), SLOT_WIDTH - 1), Style::new().fg(DIM));
+        put(frame, inner, x, y + 1 + PLOT_ROWS, fit(&points_text(curve.points), SLOT_WIDTH - 1), Style::new().fg(theme::current().dim));
     }
     if shown < curves.len() && height > 0 {
-        put(frame, inner, SIDE, height - 1, format!("… {} more", curves.len() - shown), Style::new().fg(DIM));
+        put(frame, inner, SIDE, height - 1, format!("… {} more", curves.len() - shown), Style::new().fg(theme::current().dim));
     }
 }
 

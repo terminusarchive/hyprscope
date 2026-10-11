@@ -49,3 +49,30 @@ fn a_second_argument_after_a_valid_option_is_rejected_by_name() {
     assert!(out.stdout.is_empty());
     assert!(String::from_utf8_lossy(&out.stderr).starts_with("hyprscope: unknown argument 'extra'\n"));
 }
+
+#[test]
+fn an_unknown_theme_is_named_with_the_list_and_exits_2_drawing_nothing() {
+    let out = run(&["--theme", "nope"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(out.stdout.is_empty(), "{:?}", String::from_utf8_lossy(&out.stdout));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.starts_with("hyprscope: unknown theme 'nope'\n"), "{err}");
+    assert!(err.contains("hyprland, synthwave"), "{err}");
+    assert!(err.contains("dracula"), "{err}");
+    assert!(err.ends_with("Try 'hyprscope --help'.\n"), "{err}");
+}
+
+#[test]
+fn theme_without_a_name_is_an_error_and_exits_2() {
+    let out = run(&["--theme"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(out.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&out.stderr).starts_with("hyprscope: --theme needs a name\n"));
+}
+
+#[test]
+fn a_known_theme_gets_past_the_arguments_to_the_hyprland_check() {
+    let out = run(&["--theme", "dracula"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(!String::from_utf8_lossy(&out.stderr).contains("theme"));
+}

@@ -5,7 +5,9 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Color;
 
-use crate::ui::{ACCENT, BLUE, BLUE_DEEP, CYAN, CYAN_DEEP, FLAG, FLAG_DEEP, GUIDE, MUTED};
+use crate::theme;
+#[cfg(test)]
+use crate::ui::{ACCENT, GUIDE, MUTED};
 use crate::usage::{Scale, scale};
 
 /// The two ends of a graph's gradient.
@@ -15,14 +17,25 @@ pub struct Shades {
     pub bright: Color,
 }
 
-pub const CPU: Shades = Shades { deep: CYAN_DEEP, bright: CYAN };
-pub const MEM: Shades = Shades { deep: BLUE_DEEP, bright: BLUE };
-pub const GPU: Shades = Shades { deep: FLAG_DEEP, bright: FLAG };
+pub fn cpu() -> Shades {
+    let t = theme::current();
+    Shades { deep: t.cyan_deep, bright: t.cyan }
+}
+pub fn mem() -> Shades {
+    let t = theme::current();
+    Shades { deep: t.blue_deep, bright: t.blue }
+}
+pub fn gpu() -> Shades {
+    let t = theme::current();
+    Shades { deep: t.flag_deep, bright: t.flag }
+}
 /// The Events panel's sparkline colour.
-pub const EVENTS: Shades = Shades { deep: CYAN_DEEP, bright: CYAN };
+pub fn events() -> Shades {
+    cpu()
+}
 
 /// The newest column's top cell.
-const NEWEST: Color = Color::Rgb(0xf2, 0xf8, 0xff);
+pub(crate) const NEWEST: Color = Color::Rgb(0xf2, 0xf8, 0xff);
 
 /// One cell: a space is empty and leaves the buffer as it was.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -73,7 +86,7 @@ pub fn render(
         }
         if column == width - 1 && eighths > 0 {
             let top = height - eighths.div_ceil(8);
-            rows[top][column].fg = NEWEST;
+            rows[top][column].fg = theme::current().newest;
         }
     }
     if height > 0 {
@@ -95,7 +108,7 @@ fn row_colour(from_bottom: usize, height: usize, shades: Shades) -> Color {
     let along = if height > 1 { from_bottom as f64 / (height - 1) as f64 } else { 0.0 };
     let colour = mix(shades.deep, shades.bright, along);
     let reach = (from_bottom + 1) as f64 / height as f64;
-    if reach > 0.75 { mix(colour, ACCENT, (reach - 0.75) / 0.25 * 0.75) } else { colour }
+    if reach > 0.75 { mix(colour, theme::current().accent, (reach - 0.75) / 0.25 * 0.75) } else { colour }
 }
 
 fn mix(a: Color, b: Color, t: f64) -> Color {
@@ -114,8 +127,8 @@ fn guide(row: &mut [Cell], label: &str) {
             continue;
         }
         match label.get(column).filter(|_| fits) {
-            Some(&ch) => *cell = Cell { ch, fg: MUTED },
-            None if column % 2 == 1 => *cell = Cell { ch: '┄', fg: GUIDE },
+            Some(&ch) => *cell = Cell { ch, fg: theme::current().muted },
+            None if column % 2 == 1 => *cell = Cell { ch: '┄', fg: theme::current().guide },
             None => {}
         }
     }
@@ -162,6 +175,17 @@ mod tests {
     fn distance(a: Color, b: Color) -> i32 {
         let (a, b) = (rgb(a), rgb(b));
         (a.0 - b.0).abs() + (a.1 - b.1).abs() + (a.2 - b.2).abs()
+    }
+
+    #[test]
+    fn under_the_terminal_theme_no_cell_is_24_bit_colour() {
+        let before = theme::name();
+        assert!(theme::set("terminal"));
+        let graph = render(&[5.0; 30], 20, 8, 10.0, false, cpu(), ["", ""]);
+        theme::set(before);
+        let cells: Vec<&Cell> = graph.rows.iter().flatten().collect();
+        assert!(cells.iter().any(|c| c.ch == '█'));
+        assert!(cells.iter().all(|c| !matches!(c.fg, Color::Rgb(..))));
     }
 
     #[test]

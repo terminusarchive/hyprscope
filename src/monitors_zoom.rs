@@ -11,7 +11,8 @@ use crate::hypr::{Layers, Monitor, Snapshot, Window};
 use crate::monitors_panel::{
     Arrangement, Segments, arrange, draw_rows, info_rows, line, list_line, logical_size, mode, name_style, scale, workspace_line,
 };
-use crate::ui::{ACCENT, CYAN, DIM, GOOD, MUTED, PANEL_BORDER, clean};
+use crate::ui::{clean};
+use crate::theme;
 
 /// The three marks that can list reasons for not being in effect.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -134,7 +135,7 @@ pub fn window_rects<'a>(m: &Monitor, rect: Rect, snap: &'a Snapshot) -> Vec<(Rec
 }
 
 fn draw_window(frame: &mut Frame, r: Rect, w: &Window, active: bool) {
-    let colour = if active { ACCENT } else { MUTED };
+    let colour = if active { theme::current().accent } else { theme::current().muted };
     let block = Block::bordered().border_style(Style::new().fg(colour));
     let inside = block.inner(r);
     frame.render_widget(Clear, r);
@@ -142,12 +143,12 @@ fn draw_window(frame: &mut Frame, r: Rect, w: &Window, active: bool) {
     // A column of space before the class when there is room for it.
     let pad = u16::from(inside.width > 2);
     let text = Rect::new(inside.x + pad, inside.y, inside.width.saturating_sub(2 * pad), 1.min(inside.height));
-    let style = if active { Style::new().fg(ACCENT).add_modifier(Modifier::BOLD) } else { Style::new() };
+    let style = if active { Style::new().fg(theme::current().accent).add_modifier(Modifier::BOLD) } else { Style::new() };
     frame.render_widget(Paragraph::new(line(vec![(clean(&w.class), style)], text.width as usize)), text);
 }
 
 fn draw_map_box(frame: &mut Frame, rect: Rect, m: &Monitor, snap: &Snapshot, selected: bool) {
-    let border = if m.focused { ACCENT } else { PANEL_BORDER };
+    let border = if m.focused { theme::current().accent } else { theme::current().panel_border };
     let title = Line::from(vec![Span::raw(" "), Span::styled(clean(&m.name), name_style(m)), Span::raw(" ")]);
     let block = Block::new()
         .borders(Borders::ALL)
@@ -171,14 +172,14 @@ fn draw_map_box(frame: &mut Frame, rect: Rect, m: &Monitor, snap: &Snapshot, sel
 pub fn draw_map(frame: &mut Frame, area: Rect, snap: &Snapshot, selected: i64) {
     let panel = Block::new()
         .borders(Borders::ALL)
-        .border_style(Style::new().fg(PANEL_BORDER))
-        .title_top(Line::from(Span::styled(" Map ", Style::new().fg(CYAN).add_modifier(Modifier::BOLD))));
+        .border_style(Style::new().fg(theme::current().panel_border))
+        .title_top(Line::from(Span::styled(" Map ", Style::new().fg(theme::current().cyan).add_modifier(Modifier::BOLD))));
     let inner = panel.inner(area);
     frame.render_widget(panel, area);
     // One column of margin on each side.
     let content = Rect::new(inner.x + 1.min(inner.width), inner.y, inner.width.saturating_sub(2), inner.height);
     if snap.monitors.is_empty() {
-        frame.render_widget(Paragraph::new(Line::from(Span::styled("no monitors", Style::new().fg(MUTED)))), content);
+        frame.render_widget(Paragraph::new(Line::from(Span::styled("no monitors", Style::new().fg(theme::current().muted)))), content);
         return;
     }
     match arrange(&snap.monitors, content) {
@@ -195,7 +196,7 @@ pub fn draw_map(frame: &mut Frame, area: Rect, snap: &Snapshot, selected: i64) {
                 .monitors
                 .iter()
                 .map(|m| {
-                    let mark = if m.id == selected { Span::styled("▶ ", Style::new().fg(ACCENT)) } else { Span::raw("  ") };
+                    let mark = if m.id == selected { Span::styled("▶ ", Style::new().fg(theme::current().accent)) } else { Span::raw("  ") };
                     let mut spans = vec![mark];
                     spans.extend(list_line(m, snap, (content.width as usize).saturating_sub(2)).spans);
                     Line::from(spans)
@@ -266,7 +267,7 @@ fn heading(text: &str) -> Segments {
 /// not all fit. Nothing before the modes is shortened to make room for them. A layer
 /// surface's namespace is shortened to keep its size whole within `width` columns.
 pub fn detail_lines(m: &Monitor, snap: &Snapshot, layers: Option<&Layers>, rows: usize, width: usize) -> Vec<Segments> {
-    let muted = Style::new().fg(MUTED);
+    let muted = Style::new().fg(theme::current().muted);
     let mut out: Vec<Segments> = Vec::new();
     if !m.description.is_empty() {
         out.push(plain(clean(&m.description)));
@@ -301,7 +302,7 @@ pub fn detail_lines(m: &Monitor, snap: &Snapshot, layers: Option<&Layers>, rows:
         (m.direct_scanout, "scanout", Some((Mark::Scanout, &m.direct_scanout_blocked_by))),
     ];
     for (on, word, why) in marks {
-        let (dot, colour) = if on { ("●", GOOD) } else { ("○", DIM) };
+        let (dot, colour) = if on { ("●", theme::current().good) } else { ("○", theme::current().dim) };
         out.push(vec![(dot.into(), Style::new().fg(colour)), (format!(" {word}"), muted)]);
         if let (false, Some((mark, codes))) = (on, why) {
             out.extend(reasons(mark, codes).into_iter().map(|r| vec![(format!("    {}", clean(&r)), muted)]));
@@ -335,7 +336,7 @@ pub fn detail_lines(m: &Monitor, snap: &Snapshot, layers: Option<&Layers>, rows:
         let room = rows - out.len();
         let shown = if modes.len() <= room { modes.len() } else { room - 1 };
         for (text, current) in &modes[..shown] {
-            out.push(vec![(if *current { "  ▶ ".into() } else { "    ".to_string() }, Style::new().fg(ACCENT)), (text.clone(), Style::new())]);
+            out.push(vec![(if *current { "  ▶ ".into() } else { "    ".to_string() }, Style::new().fg(theme::current().accent)), (text.clone(), Style::new())]);
         }
         if shown < modes.len() {
             out.push(vec![(format!("    … {} more", modes.len() - shown), muted)]);
@@ -347,8 +348,8 @@ pub fn detail_lines(m: &Monitor, snap: &Snapshot, layers: Option<&Layers>, rows:
 
 /// Draws the detail panel for `m` into `area`, border included, titled with its name.
 pub fn draw_detail(frame: &mut Frame, area: Rect, snap: &Snapshot, m: &Monitor, layers: Option<&Layers>) {
-    let title = Line::from(Span::styled(format!(" {} ", clean(&m.name)), Style::new().fg(CYAN).add_modifier(Modifier::BOLD)));
-    let block = Block::new().borders(Borders::ALL).border_style(Style::new().fg(PANEL_BORDER)).title_top(title);
+    let title = Line::from(Span::styled(format!(" {} ", clean(&m.name)), Style::new().fg(theme::current().cyan).add_modifier(Modifier::BOLD)));
+    let block = Block::new().borders(Borders::ALL).border_style(Style::new().fg(theme::current().panel_border)).title_top(title);
     let inside = block.inner(area);
     frame.render_widget(block, area);
     let width = inside.width.saturating_sub(2) as usize;

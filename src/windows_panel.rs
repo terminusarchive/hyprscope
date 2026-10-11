@@ -7,7 +7,10 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::tree::{Flags, Kind, Row};
-use crate::ui::{ACCENT, CYAN, DIM, FLAG, GUIDE, MONITOR, MUTED, PANEL_BORDER, SELECTED, clean, counted, fit, pad, title_name, width};
+use crate::ui::{clean, counted, fit, pad, title_name, width};
+use crate::theme;
+#[cfg(test)]
+use crate::ui::{ACCENT, CYAN, DIM, MUTED, SELECTED};
 
 /// Gap between columns.
 const GAP: &str = "  ";
@@ -15,7 +18,7 @@ const GAP: &str = "  ";
 pub fn draw(frame: &mut Frame, area: Rect, rows: &[Row], scroll: usize, selected: Option<usize>, number: Option<u8>, shown: Option<(usize, usize)>) {
     let panel = Block::new()
         .borders(Borders::ALL)
-        .border_style(Style::new().fg(PANEL_BORDER))
+        .border_style(Style::new().fg(theme::current().panel_border))
         .title_top(Line::from(title_spans(number, shown)));
     let body = panel.inner(area);
     frame.render_widget(panel, area);
@@ -30,13 +33,13 @@ pub fn draw(frame: &mut Frame, area: Rect, rows: &[Row], scroll: usize, selected
         .map(|r| row_line(r, &cols))
         .collect();
     if rows.is_empty() && shown.is_some() {
-        frame.render_widget(Paragraph::new(Line::styled(" no windows match", Style::new().fg(DIM))), tree);
+        frame.render_widget(Paragraph::new(Line::styled(" no windows match", Style::new().fg(theme::current().dim))), tree);
     }
     frame.render_widget(Paragraph::new(lines), tree);
     if let Some(offset) = selected.and_then(|i| i.checked_sub(scroll)).filter(|o| *o < tree.height as usize) {
         let buf = frame.buffer_mut();
         for x in tree.left()..tree.right() {
-            buf[(x, tree.y + offset as u16)].set_bg(SELECTED);
+            buf[(x, tree.y + offset as u16)].set_bg(theme::current().selected);
         }
     }
 }
@@ -45,7 +48,7 @@ pub fn draw(frame: &mut Frame, area: Rect, rows: &[Row], scroll: usize, selected
 fn title_spans(number: Option<u8>, shown: Option<(usize, usize)>) -> Vec<Span<'static>> {
     let mut spans = title_name("Windows", number);
     if let Some((m, n)) = shown {
-        spans.extend([Span::raw(" ─ "), Span::styled(format!("{m} of {}", counted(n, "window")), Style::new().fg(MUTED))]);
+        spans.extend([Span::raw(" ─ "), Span::styled(format!("{m} of {}", counted(n, "window")), Style::new().fg(theme::current().muted))]);
     }
     spans.push(Span::raw(" "));
     spans
@@ -115,7 +118,7 @@ const FLAGS: &str = "FLAGS";
 
 /// The column headings, laid out like a window row.
 fn heading_line(cols: &Columns) -> Line<'static> {
-    let style = Style::new().fg(MUTED);
+    let style = Style::new().fg(theme::current().muted);
     let mut cells = vec![pad(CLASS, cols.class), pad(TITLE, cols.title)];
     cells.extend(cols.pid.map(|w| pad(PID, w)));
     cells.extend(cols.geometry.map(|w| pad(GEOMETRY, w)));
@@ -132,28 +135,28 @@ fn heading_line(cols: &Columns) -> Line<'static> {
 
 fn row_line(r: &Row, cols: &Columns) -> Line<'static> {
     let mut spans = vec![Span::raw(" ")];
-    let guide = if r.focused { ACCENT } else { GUIDE };
+    let guide = if r.focused { theme::current().accent } else { theme::current().guide };
     spans.push(Span::styled(r.prefix.clone(), Style::new().fg(guide)));
     match &r.kind {
         Kind::Monitor { name, width, height, refresh_rate, scale } => {
-            spans.push(Span::styled(name.clone(), Style::new().fg(MONITOR).add_modifier(Modifier::BOLD)));
+            spans.push(Span::styled(name.clone(), Style::new().fg(theme::current().monitor).add_modifier(Modifier::BOLD)));
             spans.push(Span::styled(
                 format!("{GAP}{width}x{height}@{refresh_rate:.0} x{}", round2(*scale)),
-                Style::new().fg(MUTED),
+                Style::new().fg(theme::current().muted),
             ));
         }
         Kind::Workspace { name } => {
-            let style = if r.active { Style::new().fg(CYAN).add_modifier(Modifier::BOLD) } else { Style::new() };
+            let style = if r.active { Style::new().fg(theme::current().cyan).add_modifier(Modifier::BOLD) } else { Style::new() };
             spans.push(Span::styled(clean(name), style));
         }
         Kind::Window { class, title, pid, size, at, flags } => {
             let (text, muted, flag) = if r.hidden {
-                (Style::new().fg(DIM), Style::new().fg(DIM), Style::new().fg(DIM))
+                (Style::new().fg(theme::current().dim), Style::new().fg(theme::current().dim), Style::new().fg(theme::current().dim))
             } else if r.focused {
-                let s = Style::new().fg(ACCENT);
+                let s = Style::new().fg(theme::current().accent);
                 (s.add_modifier(Modifier::BOLD), s, s)
             } else {
-                (Style::new(), Style::new().fg(MUTED), Style::new().fg(FLAG))
+                (Style::new(), Style::new().fg(theme::current().muted), Style::new().fg(theme::current().flag))
             };
             spans.push(Span::styled(fit(&clean(class), cols.class), text));
             spans.push(Span::raw(GAP));
