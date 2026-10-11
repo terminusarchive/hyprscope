@@ -4,6 +4,8 @@ All notable changes to hyprscope are listed here, newest first.
 
 ## Unreleased
 
+## 0.3.2 - 2026-10-11
+
 - The README shows how to install from a clone of the repository.
 
 ## 0.3.1 - 2026-10-11
