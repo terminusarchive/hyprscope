@@ -329,12 +329,9 @@ fn too_small(frame: &mut Frame, area: Rect) {
     frame.render_widget(Paragraph::new(lines), block);
 }
 
-/// The top border's title: `hyprscope`, and on a zoomed screen ` ─ ` and its panel's name. The
-/// separator is a border glyph, so `gradient` colours it with the border.
-fn header(screen: Screen) -> Line<'static> {
-    let bold = Style::new().fg(theme::current().cyan).add_modifier(Modifier::BOLD);
-    let mut spans = vec![Span::raw(" "), Span::styled("hyprscope", bold)];
-    let name = match screen {
+/// The name of the panel a zoomed screen shows; the front page has none.
+fn zoom_name(screen: Screen) -> Option<&'static str> {
+    match screen {
         Screen::Front => None,
         Screen::Windows => Some("Windows"),
         Screen::Hyprland => Some("Hyprland"),
@@ -342,8 +339,24 @@ fn header(screen: Screen) -> Line<'static> {
         Screen::Events => Some("Events"),
         Screen::Log => Some("Log"),
         Screen::Config => Some("Config"),
-    };
-    if let Some(name) = name {
+    }
+}
+
+/// The terminal's title while `screen` shows: `hyprscope`, and on a zoomed screen ` — ` and
+/// its panel's name.
+pub fn window_title(screen: Screen) -> String {
+    match zoom_name(screen) {
+        Some(name) => format!("hyprscope — {name}"),
+        None => "hyprscope".to_string(),
+    }
+}
+
+/// The top border's title: `hyprscope`, and on a zoomed screen ` ─ ` and its panel's name. The
+/// separator is a border glyph, so `gradient` colours it with the border.
+fn header(screen: Screen) -> Line<'static> {
+    let bold = Style::new().fg(theme::current().cyan).add_modifier(Modifier::BOLD);
+    let mut spans = vec![Span::raw(" "), Span::styled("hyprscope", bold)];
+    if let Some(name) = zoom_name(screen) {
         spans.extend([Span::raw(" ─ "), Span::styled(name, bold)]);
     }
     spans.push(Span::raw(" "));
@@ -627,6 +640,21 @@ pub(crate) mod tests {
     use crate::usage::{Gpu, Sample};
 
     const FIXTURE: &str = include_str!("../tests/fixtures/snapshot.txt");
+
+    #[test]
+    fn the_window_title_names_the_screen() {
+        assert_eq!(window_title(Screen::Front), "hyprscope");
+        for (screen, name) in [
+            (Screen::Hyprland, "Hyprland"),
+            (Screen::Config, "Config"),
+            (Screen::Windows, "Windows"),
+            (Screen::Monitors, "Monitors"),
+            (Screen::Events, "Events"),
+            (Screen::Log, "Log"),
+        ] {
+            assert_eq!(window_title(screen), format!("hyprscope — {name}"));
+        }
+    }
 
     /// A `View` for tests, owning what it borrows. `Scene::new` has the defaults (no
     /// scroll, no selection, empty history and feed); a test sets the fields it cares

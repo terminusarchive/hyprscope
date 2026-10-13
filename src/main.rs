@@ -32,6 +32,9 @@ use std::time::{Duration, Instant};
 
 use browse::{Browse, Outcome};
 use hypr::{Hypr, Window};
+use ratatui::crossterm::execute;
+use ratatui::crossterm::style::Print;
+use ratatui::crossterm::terminal::SetTitle;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::layout::Rect;
 use tree::{Kind, Row};
@@ -547,6 +550,15 @@ fn main() -> ExitCode {
     run_dashboard()
 }
 
+/// Push the terminal's title on its title stack, and pop it back.
+const SAVE_TITLE: &str = "\x1b[22;0t";
+const RESTORE_TITLE: &str = "\x1b[23;0t";
+
+/// Set the terminal's title to the one for `screen`. A terminal that ignores it is not an error.
+fn set_title(screen: Screen) {
+    let _ = execute!(std::io::stdout(), SetTitle(ui::window_title(screen)));
+}
+
 fn run_dashboard() -> ExitCode {
     let first = Hypr::from_env().and_then(|hypr| hypr.snapshot().map(|snap| (hypr, snap)));
     let (hypr, snap) = match first {
@@ -568,7 +580,9 @@ fn run_dashboard() -> ExitCode {
             return fail(&e.to_string());
         }
     };
+    let _ = execute!(std::io::stdout(), Print(SAVE_TITLE));
     let result = run(&mut terminal, &hypr, snap, stream);
+    let _ = execute!(std::io::stdout(), Print(RESTORE_TITLE));
     ratatui::restore();
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -603,6 +617,7 @@ fn run(
     };
     let (mut rows, mut selected) = rebuild(&snap, "", &[], None);
     let mut screen = Screen::Front;
+    set_title(screen);
     let mut zoom = Zoom::default();
     let mut table: Option<Table> = None;
     // The Monitors screen's own state; it exists only while that screen shows.
@@ -714,6 +729,7 @@ fn run(
                         let next = next_screen(screen, &action);
                         if next != screen {
                             screen = next;
+                            set_title(screen);
                             browse = Browse::default();
                             floor = log_zoom::Floor::default();
                             // The Config screen's state is dropped and its lists are read

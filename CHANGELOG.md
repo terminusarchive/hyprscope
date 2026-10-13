@@ -4,6 +4,8 @@ All notable changes to hyprscope are listed here, newest first.
 
 ## Unreleased
 
+- The terminal's title is `hyprscope`, with the view's name while one is open full-screen (`hyprscope — Windows`). The title from before comes back on exit.
+
 ## 0.3.3 - 2026-10-11
 
 - The crate's description is reworded.
