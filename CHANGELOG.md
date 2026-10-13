@@ -4,6 +4,8 @@ All notable changes to hyprscope are listed here, newest first.
 
 ## Unreleased
 
+## 0.3.4 - 2026-10-13
+
 - The terminal's title is `hyprscope`, with the view's name while one is open full-screen (`hyprscope — Windows`). The title from before comes back on exit.
 
 ## 0.3.3 - 2026-10-11
